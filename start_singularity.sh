@@ -19,9 +19,6 @@ fi
 
 TMP_OVERLAY_SOURCE=overlay-0.5GB-200K.ext3
 
-# Set temporary directory in case it is not set
-TMPDIR=${TMPDIR:-/tmp}
-
 # This is the name of the temporary writable overlay to use. 
 # By default, it is defined as overlay-temp.ext3, but you may
 # re-define it to some other value by setting an environment variable
@@ -68,5 +65,6 @@ singularity exec --no-home -B $HOME/.ssh -B /scratch -B $PWD --nv \
     --overlay $TMP_OVERLAY \
     --overlay overlay-base.ext3:ro \
     --overlay overlay-packages.ext3:ro \
+    --overlay $DATA_DIRECTORY/places365.squashfs:ro \
     $IMAGE /bin/bash
     
