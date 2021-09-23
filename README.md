@@ -12,8 +12,10 @@ For first time usage:
 
 Start from here if you have done step 1 and 2 before:
 
-3. Start singularity with `./start_singularity.sh`
+3. Start singularity with `./start_singularity.sh`.
 
 4. Run `conda activate /ext3/conda/bootcamp` to activate conda environment inside the singularity.
 
-5. Run `./scripts/run_sshd.sh`
+5. Run `./scripts/run_sshd.sh` and then `ssh localhost -p 12345`.
+
+Then you can use vscode interface to ssh into the instance container.
