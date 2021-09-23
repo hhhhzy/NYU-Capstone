@@ -8,7 +8,7 @@ For first time usage:
 
 1. Clone this repo to GCP instance.
 
-2. In the main directory of nyu-bootcamp, run `./scripts/create_base_overlay.sh` and `./scripts/create_package_overlay.sh`.
+2. In the main directory of nyu-capstone, run `./scripts/create_base_overlay.sh` and `./scripts/create_package_overlay.sh`.
 
 Start from here if you have done step 1 and 2 before:
 
