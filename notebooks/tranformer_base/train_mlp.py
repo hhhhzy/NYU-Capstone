@@ -56,9 +56,10 @@ def train(config, checkpoint_dir):
     #     model.load_state_dict(model_state)
     #     optimizer.load_state_dict(optimizer_state)
         
-    train_loader,val_loader, test_loader = get_data_loaders(train_proportion, test_proportion, val_proportion, window_size=window_size, pred_size =1, batch_size=batch_size, num_workers = 2, pin_memory = True)
+    train_loader,val_loader, test_loader = get_data_loaders(train_proportion, test_proportion, val_proportion,\
+         window_size=window_size, pred_size =1, batch_size=batch_size, num_workers = 2, pin_memory = False)
 
-    epochs = 5
+    epochs = 200
     for epoch in range(1, epochs + 1):
         model.train() 
         total_loss = 0.
@@ -83,20 +84,20 @@ def train(config, checkpoint_dir):
 
 if __name__ == "__main__":
     config = {
-        'hidden_size':tune.grid_search([32,64,128]),
+        'hidden_size':tune.grid_search([32,64,128,256]),
         'num_hidden_layers':tune.grid_search([1,2,3,4]),
         'dropout':tune.grid_search([0.1,0.05]),
         'lr':tune.grid_search([0.01,0.001,0.0001]),
         'window_size':tune.grid_search([12,36,108,324]),
-        'batch_size':tune.grid_search([10,20])
+        'batch_size':tune.grid_search([16])
 }
     ray.init(ignore_reinit_error=False)
     sched = ASHAScheduler(
-            max_t=10,
-            grace_period=1,
+            max_t=200,
+            grace_period=20,
             reduction_factor=2)
     analysis = tune.run(tune.with_parameters(train), config=config, metric='val_loss', mode='min',\
-         scheduler=sched, resources_per_trial={"gpu": 2},local_dir="/scratch/yd1008/ray_results",)
+         scheduler=sched, resources_per_trial={"gpu": 1},local_dir="/scratch/yd1008/ray_results",)
 
     best_trail = analysis.get_best_config(mode='min')
     print('The best configs are: ',best_trail)
