@@ -35,9 +35,9 @@ def train(config, checkpoint_dir):
     num_layer = config['num_layer']
     num_head = config['num_head']
     dropout = config['dropout']
-    lr = config['lr']
-    window_size = config['window_size']
-    batch_size = config['batch_size']
+    lr = 0.0001#config['lr']
+    window_size = 12#config['window_size']
+    batch_size = 16#config['batch_size']
     
     model = Tranformer(feature_size=feature_size,num_layers=num_layer,dropout=dropout,num_head=num_head)
     device = "cpu"
@@ -46,11 +46,11 @@ def train(config, checkpoint_dir):
         if torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
     model.to(device)
-            
+    epochs = 300        
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95   )
-    writer = tensorboard.SummaryWriter('./test_logs')
+    scheduler = optim.lr_scheduler.StepLR(optimizer, 20, gamma=0.95, last_epoch = epochs-1   )
+    #writer = tensorboard.SummaryWriter('./test_logs')
     
     # if checkpoint_dir:
     #     checkpoint = os.path.join(checkpoint_dir, "checkpoint")
@@ -61,7 +61,6 @@ def train(config, checkpoint_dir):
     train_loader,val_loader, test_loader = get_data_loaders(train_proportion, test_proportion, val_proportion,\
          window_size=window_size, pred_size =1, batch_size=batch_size, num_workers = 2, pin_memory = False)
 
-    epochs = 300
     for epoch in range(1, epochs + 1):
         model.train() 
         total_loss = 0.
@@ -74,33 +73,34 @@ def train(config, checkpoint_dir):
             total_loss += loss.item()
             loss.backward()
             optimizer.step()
-            scheduler.step() 
+            
             
 
         val_loss = evaluate(model, val_loader, criterion)
         print(f'Epoch: {epoch}, train_loss: {total_loss}, val_loss: {val_loss}')
-        writer.add_scalar('train_loss',total_loss,epoch)
-        writer.add_scalar('val_loss',val_loss,epoch)
+        #writer.add_scalar('train_loss',total_loss,epoch)
+        #writer.add_scalar('val_loss',val_loss,epoch)
         tune.report(val_loss=val_loss)
+        scheduler.step() 
 
 
 if __name__ == "__main__":
     config = {
-        'feature_size':tune.grid_search([32,64,128,256]),
-        'num_layer':tune.grid_search([1,2,3,4]),
-        'num_head':tune.grid_search([1,2,3,4]),
-        'dropout':tune.grid_search([0.1,0.05]),
-        'lr':tune.grid_search([0.01,0.001,0.0001,0.00001]),
-        'window_size':tune.grid_search([12,36,108,324]),
-        'batch_size':tune.grid_search([16])
+        'feature_size':tune.grid_search([16,32,64,128]),
+        'num_layer':tune.grid_search([2,4,8]),
+        'num_head':tune.grid_search([2,4,8]),
+        'dropout':tune.grid_search([0.1,0.2]),
+        #'lr':tune.grid_search([0.0001]),
+        #'window_size':tune.grid_search([12,36,108,324]),
+        #'batch_size':tune.grid_search([16])
 }
     ray.init(ignore_reinit_error=False)
     sched = ASHAScheduler(
-            max_t=500,
-            grace_period=80,
+            max_t=200,
+            grace_period=20,
             reduction_factor=2)
     analysis = tune.run(tune.with_parameters(train), config=config, metric='val_loss', mode='min',\
-         scheduler=sched, resources_per_trial={"gpu": 2},local_dir="/scratch/yd1008/ray_results",)
+         scheduler=sched, resources_per_trial={"cpu": 32,"gpu": 4},local_dir="/scratch/yd1008/ray_results",)
 
     best_trail = analysis.get_best_config(mode='min')
     print('The best configs are: ',best_trail)

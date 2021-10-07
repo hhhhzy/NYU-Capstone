@@ -3,10 +3,10 @@
 #SBATCH --nodes=1 ### No change
 #SBATCH --mem=36GB
 #SBATCH --cpus-per-task=8 ### No less than gpu
-#SBATCH --time=8:00:00
+#SBATCH --time=16:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --job-name=trts
-
+##gpu:2 -c2 or gpu:k80:3 -c3
 module purge
 set -e
 OVERLAY_DIRECTORY=/scratch/work/public/overlay-fs-ext3/
@@ -16,7 +16,6 @@ fi
 TMP_OVERLAY_SOURCE=overlay-0.5GB-200K.ext3
 TMPDIR=${TMPDIR:-/tmp}
 TMP_OVERLAY=${TMP_OVERLAY:-overlay-temp.ext3}
-DATA_DIRECTORY=${DATA_DIRECTORY:-/scratch/wz2247/data/}
 IMAGE=${IMAGE:-/scratch/wz2247/singularity/images/pytorch_21.06-py3.sif}
 if [[ ! -f $TMP_OVERLAY ]]; then
 echo "Temporary overlay not found, automatically creating a new one."

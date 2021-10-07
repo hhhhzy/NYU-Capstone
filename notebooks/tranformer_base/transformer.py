@@ -1,6 +1,8 @@
 #!/bin/bash python
 import torch 
 import torch.nn as nn
+import math
+
 class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model, dropout= 0.1, max_len= 5000):
@@ -24,8 +26,12 @@ class Tranformer(nn.Module):
         
         self.src_mask = None
         self.pos_encoder = PositionalEncoding(feature_size)
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=feature_size, nhead=num_head, dropout=dropout)
-        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)        
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=feature_size, \
+            nhead=num_head, dropout=dropout, dim_feedforward = 4*feature_size)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)      
+        self.decoder_layer = nn.TransformerDecoderLayer(d_model=feature_size, \
+            nhead=num_head, dropout=dropout, dim_feedforward = 4*feature_size)  
+        self.decoder_layer = nn.TransformerDecoder(self.decoder_layer, num_layers=num_layers)
         self.decoder = nn.Linear(feature_size,1)
         self.init_weights()
 

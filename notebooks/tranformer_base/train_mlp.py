@@ -34,8 +34,8 @@ def train(config, checkpoint_dir):
     num_hidden_layers = config['num_hidden_layers']
     dropout = config['dropout']
     lr = config['lr']
-    window_size = config['window_size']
-    batch_size = config['batch_size']
+    window_size = 12#config['window_size']
+    batch_size = 16#config['batch_size']
     
     model = MLP(1,1,hidden_size,num_hidden_layers, dropout)
     device = "cpu"
@@ -72,7 +72,7 @@ def train(config, checkpoint_dir):
             total_loss += loss.item()
             loss.backward()
             optimizer.step()
-            scheduler.step() 
+            
             
 
         val_loss = evaluate(model, val_loader, criterion)
@@ -80,6 +80,7 @@ def train(config, checkpoint_dir):
         writer.add_scalar('train_loss',total_loss,epoch)
         writer.add_scalar('val_loss',val_loss,epoch)
         tune.report(val_loss=val_loss)
+        scheduler.step() 
 
 
 if __name__ == "__main__":
@@ -88,16 +89,16 @@ if __name__ == "__main__":
         'num_hidden_layers':tune.grid_search([1,2,3,4]),
         'dropout':tune.grid_search([0.1,0.05]),
         'lr':tune.grid_search([0.01,0.001,0.0001]),
-        'window_size':tune.grid_search([12,36,108,324]),
-        'batch_size':tune.grid_search([16])
+        #'window_size':tune.grid_search([12,36,108,324]),
+        #'batch_size':tune.grid_search([16])
 }
     ray.init(ignore_reinit_error=False)
     sched = ASHAScheduler(
-            max_t=200,
+            max_t=100,
             grace_period=20,
             reduction_factor=2)
     analysis = tune.run(tune.with_parameters(train), config=config, metric='val_loss', mode='min',\
-         scheduler=sched, resources_per_trial={"gpu": 1},local_dir="/scratch/yd1008/ray_results",)
+         scheduler=sched, resources_per_trial={"cpu": 32, "gpu": 4},local_dir="/scratch/yd1008/ray_results",)
 
     best_trail = analysis.get_best_config(mode='min')
     print('The best configs are: ',best_trail)
