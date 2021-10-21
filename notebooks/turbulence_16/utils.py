@@ -75,7 +75,8 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     np.random.seed(505)
     
-    data_path='C:/Users/52673/Desktop/NYU MSDS/3-DS-1006 CAPSTONE/data_turb_dedt1_16'
+    # data_path='C:/Users/52673/Desktop/NYU MSDS/3-DS-1006 CAPSTONE/data_turb_dedt1_16' # if locally
+    data_path='/scratch/zh2095/data_turb_dedt1_16'
     data, meshed_blocks = get_rho(data_path)
     
     train_data,val_data,test_data,train_original,val_original,test_original = train_test_val_split(\
