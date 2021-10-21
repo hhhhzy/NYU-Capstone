@@ -51,23 +51,40 @@ class CustomDataset(torch.utils.data.Dataset):
     def __getitem__(self,idx):
         return(self.x[idx][0].view(-1,1),self.x[idx][1].view(-1,1))
     
-def get_data_loaders(train_proportion = 0.6, test_proportion = 0.2, val_proportion = 0.2,window_size = 10, pred_size =1, batch_size = 10, num_workers = 1, pin_memory = True): 
+def get_data_loaders(train_proportion = 0.6, test_proportion = 0.2, val_proportion = 0.2,window_size = 10, \
+    pred_size =1, batch_size = 10, num_workers = 1, pin_memory = True, test_mode = False): 
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     np.random.seed(505)
+    time_step = 0.05
+    time_vec = np.arange(0,100,time_step)
+    period = 5
+    #long_range_stationary_x_vals = (np.sin(2*np.pi*time_vec/period))+(np.cos(3*np.pi*time_vec/period)) + 0.25*np.random.randn(time_vec.size)
     long_range_stationary_x_vals = arfima([0.5,0.4],0.3,[0.2,0.1],10000,warmup=2^10)
     train_data,val_data,test_data,train_original,val_original,test_original, scaler = train_test_val_split(\
         long_range_stationary_x_vals ,train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
         , window_size = window_size, pred_size = pred_size)
-    
-    dataset_train, dataset_test, dataset_val = CustomDataset(train_data), CustomDataset(test_data), CustomDataset(val_data)
-    train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, 
+    if test_mode:
+        train_val_data = torch.cat((train_data,val_data),0)
+        dataset_train_val, dataset_test = CustomDataset(train_val_data), CustomDataset(test_data)
+        train_val_loader = torch.utils.data.DataLoader(dataset_train_val, batch_size=batch_size, 
                                         drop_last=False, 
                                         num_workers=num_workers, pin_memory=pin_memory)
-    test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size, 
+        test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=1, 
                                         drop_last=False, 
-                                        num_workers=num_workers, pin_memory=pin_memory)
-    val_loader = torch.utils.data.DataLoader(dataset_val, batch_size=batch_size, 
-                                        drop_last=False, 
-                                        num_workers=num_workers, pin_memory=pin_memory)
-    return train_loader,val_loader, test_loader
+                                        num_workers=num_workers, pin_memory=pin_memory) 
+        return train_val_loader, test_loader
+    if not test_mode:                           
+        dataset_train, dataset_test, dataset_val = CustomDataset(train_data), CustomDataset(test_data), CustomDataset(val_data)
+        train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, 
+                                            drop_last=False, 
+                                            num_workers=num_workers, pin_memory=pin_memory)
+        test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size, 
+                                            drop_last=False, 
+                                            num_workers=num_workers, pin_memory=pin_memory)
+        val_loader = torch.utils.data.DataLoader(dataset_val, batch_size=batch_size, 
+                                            drop_last=False, 
+                                            num_workers=num_workers, pin_memory=pin_memory)
+                        
+        return train_loader,val_loader, test_loader

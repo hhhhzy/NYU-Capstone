@@ -1,0 +1,244 @@
+Miniconda3-latest-Linux-x86_64.sh
+README.md
+__pycache__
+_arfima.py
+data
+fft_freq.py
+mlp.py
+mlp_output.py
+notebooks
+output_mlp.sbatch
+output_transformer.sbatch
+overlay-base.ext3
+overlay-packages.ext3
+overlay-temp.ext3
+papers
+pytorch1.8.0-cuda11.1.ext3
+ray_results
+scripts
+slurm-11070285.out
+start_singularity.sh
+train_mlp.py
+train_mlp.sbatch
+train_transformer.py
+train_transformer.sbatch
+transformer.py
+transformer_output.py
+tune_results
+utils.py
+Using device:  cuda:0
+Total of 1312 samples in training set and 256 samples in test set
+Epoch: 1, train_loss: 1.3988089021749612, test_loss: 0.6856751310031086, lr: [1e-05]
+Epoch: 2, train_loss: 0.6639542928556117, test_loss: 0.3020787000060352, lr: [1e-05]
+Epoch: 3, train_loss: 0.3443450272628447, test_loss: 0.17959799532819165, lr: [1e-05]
+Epoch: 4, train_loss: 0.4309797721301637, test_loss: 0.290126661534984, lr: [1e-05]
+----Current loss 0.290126661534984 higher than best loss 0.17959799532819165, early stop counter 1----
+Epoch: 5, train_loss: 0.362630160752593, test_loss: 0.21804865257595907, lr: [1e-05]
+----Current loss 0.21804865257595907 higher than best loss 0.17959799532819165, early stop counter 2----
+Epoch: 6, train_loss: 0.22980985745060734, test_loss: 0.17371688726761342, lr: [9.5e-06]
+Epoch: 7, train_loss: 0.2346517398226552, test_loss: 0.13810685710799975, lr: [9.5e-06]
+Epoch: 8, train_loss: 0.22908855093325056, test_loss: 0.17123239852284033, lr: [9.5e-06]
+----Current loss 0.17123239852284033 higher than best loss 0.13810685710799975, early stop counter 1----
+Epoch: 9, train_loss: 0.20014079069582427, test_loss: 0.1292599399942605, lr: [9.5e-06]
+Saving prediction for epoch 10
+Epoch: 10, train_loss: 0.2681466218356679, test_loss: 0.2022980289032828, lr: [9.5e-06]
+----Current loss 0.2022980289032828 higher than best loss 0.1292599399942605, early stop counter 1----
+Epoch: 11, train_loss: 0.2179676007206847, test_loss: 0.13652128232436134, lr: [9.025e-06]
+----Current loss 0.13652128232436134 higher than best loss 0.1292599399942605, early stop counter 2----
+Epoch: 12, train_loss: 0.15830184587436477, test_loss: 0.12487329682766823, lr: [9.025e-06]
+Epoch: 13, train_loss: 0.19410515940043985, test_loss: 0.17826746586949227, lr: [9.025e-06]
+----Current loss 0.17826746586949227 higher than best loss 0.12487329682766823, early stop counter 1----
+Epoch: 14, train_loss: 0.1671205577326984, test_loss: 0.1433487178527968, lr: [9.025e-06]
+----Current loss 0.1433487178527968 higher than best loss 0.12487329682766823, early stop counter 2----
+Epoch: 15, train_loss: 0.16593770210335895, test_loss: 0.1109154436362525, lr: [9.025e-06]
+Epoch: 16, train_loss: 0.17837681921153534, test_loss: 0.10915634834339993, lr: [8.57375e-06]
+Epoch: 17, train_loss: 0.18260589341928318, test_loss: 0.1904773047990318, lr: [8.57375e-06]
+----Current loss 0.1904773047990318 higher than best loss 0.10915634834339993, early stop counter 1----
+Epoch: 18, train_loss: 0.17146609823514775, test_loss: 0.13368201387009293, lr: [8.57375e-06]
+----Current loss 0.13368201387009293 higher than best loss 0.10915634834339993, early stop counter 2----
+Epoch: 19, train_loss: 0.18125017268992052, test_loss: 0.12019753579876458, lr: [8.57375e-06]
+----Current loss 0.12019753579876458 higher than best loss 0.10915634834339993, early stop counter 3----
+Saving prediction for epoch 20
+Epoch: 20, train_loss: 0.16303702743678558, test_loss: 0.14813046851022804, lr: [8.57375e-06]
+----Current loss 0.14813046851022804 higher than best loss 0.10915634834339993, early stop counter 4----
+Epoch: 21, train_loss: 0.13546132509846512, test_loss: 0.1270374108282688, lr: [8.1450625e-06]
+----Current loss 0.1270374108282688 higher than best loss 0.10915634834339993, early stop counter 5----
+Epoch: 22, train_loss: 0.142183722882736, test_loss: 0.11696462162869281, lr: [8.1450625e-06]
+----Current loss 0.11696462162869281 higher than best loss 0.10915634834339993, early stop counter 6----
+Epoch: 23, train_loss: 0.1221446622980804, test_loss: 0.125645635399664, lr: [8.1450625e-06]
+----Current loss 0.125645635399664 higher than best loss 0.10915634834339993, early stop counter 7----
+Epoch: 24, train_loss: 0.14906598727514103, test_loss: 0.12664440644757657, lr: [8.1450625e-06]
+----Current loss 0.12664440644757657 higher than best loss 0.10915634834339993, early stop counter 8----
+Epoch: 25, train_loss: 0.1461712071535791, test_loss: 0.1296243528115255, lr: [8.1450625e-06]
+----Current loss 0.1296243528115255 higher than best loss 0.10915634834339993, early stop counter 9----
+Epoch: 26, train_loss: 0.13490759717618547, test_loss: 0.10114242956098463, lr: [7.737809375e-06]
+Epoch: 27, train_loss: 0.11860170787790926, test_loss: 0.11664449119217096, lr: [7.737809375e-06]
+----Current loss 0.11664449119217096 higher than best loss 0.10114242956098463, early stop counter 1----
+Epoch: 28, train_loss: 0.11577755176439518, test_loss: 0.10666825578841355, lr: [7.737809375e-06]
+----Current loss 0.10666825578841355 higher than best loss 0.10114242956098463, early stop counter 2----
+Epoch: 29, train_loss: 0.13259955068550458, test_loss: 0.11462997571907518, lr: [7.737809375e-06]
+----Current loss 0.11462997571907518 higher than best loss 0.10114242956098463, early stop counter 3----
+Saving prediction for epoch 30
+Epoch: 30, train_loss: 0.11771745307416451, test_loss: 0.1066085174211171, lr: [7.737809375e-06]
+----Current loss 0.1066085174211171 higher than best loss 0.10114242956098463, early stop counter 4----
+Epoch: 31, train_loss: 0.12015147507190704, test_loss: 0.1194827007258959, lr: [7.35091890625e-06]
+----Current loss 0.1194827007258959 higher than best loss 0.10114242956098463, early stop counter 5----
+Epoch: 32, train_loss: 0.12341506470267366, test_loss: 0.112191833287824, lr: [7.35091890625e-06]
+----Current loss 0.112191833287824 higher than best loss 0.10114242956098463, early stop counter 6----
+Epoch: 33, train_loss: 0.11108874634089994, test_loss: 0.09830756801280904, lr: [7.35091890625e-06]
+Epoch: 34, train_loss: 0.12055118200255603, test_loss: 0.11160037146576496, lr: [7.35091890625e-06]
+----Current loss 0.11160037146576496 higher than best loss 0.09830756801280904, early stop counter 1----
+Epoch: 35, train_loss: 0.11769941058464167, test_loss: 0.10759753071963907, lr: [7.35091890625e-06]
+----Current loss 0.10759753071963907 higher than best loss 0.09830756801280904, early stop counter 2----
+Epoch: 36, train_loss: 0.11388841321373858, test_loss: 0.1155960941588149, lr: [6.9833729609374995e-06]
+----Current loss 0.1155960941588149 higher than best loss 0.09830756801280904, early stop counter 3----
+Epoch: 37, train_loss: 0.1137302552418011, test_loss: 0.1192264855804801, lr: [6.9833729609374995e-06]
+----Current loss 0.1192264855804801 higher than best loss 0.09830756801280904, early stop counter 4----
+Epoch: 38, train_loss: 0.11171035270956231, test_loss: 0.12004885206299681, lr: [6.9833729609374995e-06]
+----Current loss 0.12004885206299681 higher than best loss 0.09830756801280904, early stop counter 5----
+Epoch: 39, train_loss: 0.10616207449901395, test_loss: 0.1078340635624997, lr: [6.9833729609374995e-06]
+----Current loss 0.1078340635624997 higher than best loss 0.09830756801280904, early stop counter 6----
+Saving prediction for epoch 40
+Epoch: 40, train_loss: 0.10758184541652842, test_loss: 0.12006013133675353, lr: [6.9833729609374995e-06]
+----Current loss 0.12006013133675353 higher than best loss 0.09830756801280904, early stop counter 7----
+Epoch: 41, train_loss: 0.10975569409386414, test_loss: 0.11878298827620404, lr: [6.634204312890624e-06]
+----Current loss 0.11878298827620404 higher than best loss 0.09830756801280904, early stop counter 8----
+Epoch: 42, train_loss: 0.09874655351769633, test_loss: 0.1070862423432617, lr: [6.634204312890624e-06]
+----Current loss 0.1070862423432617 higher than best loss 0.09830756801280904, early stop counter 9----
+Epoch: 43, train_loss: 0.11062130272933622, test_loss: 0.10864831123227342, lr: [6.634204312890624e-06]
+----Current loss 0.10864831123227342 higher than best loss 0.09830756801280904, early stop counter 10----
+Epoch: 44, train_loss: 0.11136426422290685, test_loss: 0.1180566640398753, lr: [6.634204312890624e-06]
+----Current loss 0.1180566640398753 higher than best loss 0.09830756801280904, early stop counter 11----
+Epoch: 45, train_loss: 0.10094996173752517, test_loss: 0.11373683225347353, lr: [6.634204312890624e-06]
+----Current loss 0.11373683225347353 higher than best loss 0.09830756801280904, early stop counter 12----
+Epoch: 46, train_loss: 0.09884264747180589, test_loss: 0.11259744049669718, lr: [6.302494097246093e-06]
+----Current loss 0.11259744049669718 higher than best loss 0.09830756801280904, early stop counter 13----
+Epoch: 47, train_loss: 0.09643273905101346, test_loss: 0.09685594424616717, lr: [6.302494097246093e-06]
+Epoch: 48, train_loss: 0.10904048501354892, test_loss: 0.1250514841968604, lr: [6.302494097246093e-06]
+----Current loss 0.1250514841968604 higher than best loss 0.09685594424616717, early stop counter 1----
+Epoch: 49, train_loss: 0.09222567994601844, test_loss: 0.1000331391238225, lr: [6.302494097246093e-06]
+----Current loss 0.1000331391238225 higher than best loss 0.09685594424616717, early stop counter 2----
+Saving prediction for epoch 50
+Epoch: 50, train_loss: 0.10159232739995165, test_loss: 0.10062471994096583, lr: [6.302494097246093e-06]
+----Current loss 0.10062471994096583 higher than best loss 0.09685594424616717, early stop counter 3----
+Epoch: 51, train_loss: 0.1008321706023885, test_loss: 0.11002699306239466, lr: [5.9873693923837885e-06]
+----Current loss 0.11002699306239466 higher than best loss 0.09685594424616717, early stop counter 4----
+Epoch: 52, train_loss: 0.08965887806219298, test_loss: 0.09257268107089445, lr: [5.9873693923837885e-06]
+Epoch: 53, train_loss: 0.09633079543709755, test_loss: 0.10160666296713089, lr: [5.9873693923837885e-06]
+----Current loss 0.10160666296713089 higher than best loss 0.09257268107089445, early stop counter 1----
+Epoch: 54, train_loss: 0.09329083107593583, test_loss: 0.11876871359253727, lr: [5.9873693923837885e-06]
+----Current loss 0.11876871359253727 higher than best loss 0.09257268107089445, early stop counter 2----
+Epoch: 55, train_loss: 0.08865631369465007, test_loss: 0.0936159546300992, lr: [5.9873693923837885e-06]
+----Current loss 0.0936159546300992 higher than best loss 0.09257268107089445, early stop counter 3----
+Epoch: 56, train_loss: 0.09034001849955176, test_loss: 0.09145179639389855, lr: [5.688000922764599e-06]
+Epoch: 57, train_loss: 0.0900765756917436, test_loss: 0.10042483875075142, lr: [5.688000922764599e-06]
+----Current loss 0.10042483875075142 higher than best loss 0.09145179639389855, early stop counter 1----
+Epoch: 58, train_loss: 0.09155549717749037, test_loss: 0.09595349649628473, lr: [5.688000922764599e-06]
+----Current loss 0.09595349649628473 higher than best loss 0.09145179639389855, early stop counter 2----
+Epoch: 59, train_loss: 0.098938373985087, test_loss: 0.09808055560176948, lr: [5.688000922764599e-06]
+----Current loss 0.09808055560176948 higher than best loss 0.09145179639389855, early stop counter 3----
+Saving prediction for epoch 60
+Epoch: 60, train_loss: 0.09319069029808771, test_loss: 0.09858177306312133, lr: [5.688000922764599e-06]
+----Current loss 0.09858177306312133 higher than best loss 0.09145179639389855, early stop counter 4----
+Epoch: 61, train_loss: 0.09114433965850167, test_loss: 0.10454437745366535, lr: [5.403600876626369e-06]
+----Current loss 0.10454437745366535 higher than best loss 0.09145179639389855, early stop counter 5----
+Epoch: 62, train_loss: 0.0920666849649534, test_loss: 0.0994470920184094, lr: [5.403600876626369e-06]
+----Current loss 0.0994470920184094 higher than best loss 0.09145179639389855, early stop counter 6----
+Epoch: 63, train_loss: 0.09780472707821102, test_loss: 0.11252732050276593, lr: [5.403600876626369e-06]
+----Current loss 0.11252732050276593 higher than best loss 0.09145179639389855, early stop counter 7----
+Epoch: 64, train_loss: 0.09479844924516795, test_loss: 0.08940107149196308, lr: [5.403600876626369e-06]
+Epoch: 65, train_loss: 0.09765039634232114, test_loss: 0.10138098192683188, lr: [5.403600876626369e-06]
+----Current loss 0.10138098192683188 higher than best loss 0.08940107149196308, early stop counter 1----
+Epoch: 66, train_loss: 0.089315403616283, test_loss: 0.09113537813979633, lr: [5.13342083279505e-06]
+----Current loss 0.09113537813979633 higher than best loss 0.08940107149196308, early stop counter 2----
+Epoch: 67, train_loss: 0.09121323815297062, test_loss: 0.1083288899569902, lr: [5.13342083279505e-06]
+----Current loss 0.1083288899569902 higher than best loss 0.08940107149196308, early stop counter 3----
+Epoch: 68, train_loss: 0.09351360527571381, test_loss: 0.09774220868644168, lr: [5.13342083279505e-06]
+----Current loss 0.09774220868644168 higher than best loss 0.08940107149196308, early stop counter 4----
+Epoch: 69, train_loss: 0.09030197270032836, test_loss: 0.10407974545525334, lr: [5.13342083279505e-06]
+----Current loss 0.10407974545525334 higher than best loss 0.08940107149196308, early stop counter 5----
+Saving prediction for epoch 70
+Epoch: 70, train_loss: 0.08913989490034377, test_loss: 0.0976946483914396, lr: [5.13342083279505e-06]
+----Current loss 0.0976946483914396 higher than best loss 0.08940107149196308, early stop counter 6----
+Epoch: 71, train_loss: 0.0863192412184506, test_loss: 0.10242756564621147, lr: [4.876749791155297e-06]
+----Current loss 0.10242756564621147 higher than best loss 0.08940107149196308, early stop counter 7----
+Epoch: 72, train_loss: 0.08862949040059637, test_loss: 0.0927981988389131, lr: [4.876749791155297e-06]
+----Current loss 0.0927981988389131 higher than best loss 0.08940107149196308, early stop counter 8----
+Epoch: 73, train_loss: 0.09150988367817751, test_loss: 0.09081193300437662, lr: [4.876749791155297e-06]
+----Current loss 0.09081193300437662 higher than best loss 0.08940107149196308, early stop counter 9----
+Epoch: 74, train_loss: 0.08928446826048014, test_loss: 0.09258576495005233, lr: [4.876749791155297e-06]
+----Current loss 0.09258576495005233 higher than best loss 0.08940107149196308, early stop counter 10----
+Epoch: 75, train_loss: 0.08582931729715045, test_loss: 0.10113713910249889, lr: [4.876749791155297e-06]
+----Current loss 0.10113713910249889 higher than best loss 0.08940107149196308, early stop counter 11----
+Epoch: 76, train_loss: 0.0847108633053012, test_loss: 0.09498715395629631, lr: [4.6329123015975315e-06]
+----Current loss 0.09498715395629631 higher than best loss 0.08940107149196308, early stop counter 12----
+Epoch: 77, train_loss: 0.09070707816721463, test_loss: 0.10270812597776713, lr: [4.6329123015975315e-06]
+----Current loss 0.10270812597776713 higher than best loss 0.08940107149196308, early stop counter 13----
+Epoch: 78, train_loss: 0.08913896855239462, test_loss: 0.10737601639299488, lr: [4.6329123015975315e-06]
+----Current loss 0.10737601639299488 higher than best loss 0.08940107149196308, early stop counter 14----
+Epoch: 79, train_loss: 0.08746323239330839, test_loss: 0.09754111207349925, lr: [4.6329123015975315e-06]
+----Current loss 0.09754111207349925 higher than best loss 0.08940107149196308, early stop counter 15----
+Saving prediction for epoch 80
+Epoch: 80, train_loss: 0.08417378054795469, test_loss: 0.09965532115232989, lr: [4.6329123015975315e-06]
+----Current loss 0.09965532115232989 higher than best loss 0.08940107149196308, early stop counter 16----
+Epoch: 81, train_loss: 0.08907957002520561, test_loss: 0.09436998097230642, lr: [4.401266686517655e-06]
+----Current loss 0.09436998097230642 higher than best loss 0.08940107149196308, early stop counter 17----
+Epoch: 82, train_loss: 0.08349332358778977, test_loss: 0.09563802294135826, lr: [4.401266686517655e-06]
+----Current loss 0.09563802294135826 higher than best loss 0.08940107149196308, early stop counter 18----
+Epoch: 83, train_loss: 0.08917339786705447, test_loss: 0.09513031964797491, lr: [4.401266686517655e-06]
+----Current loss 0.09513031964797491 higher than best loss 0.08940107149196308, early stop counter 19----
+Epoch: 84, train_loss: 0.0861732611977836, test_loss: 0.08753833367981123, lr: [4.401266686517655e-06]
+Epoch: 85, train_loss: 0.08409690011928721, test_loss: 0.10755850011955559, lr: [4.401266686517655e-06]
+----Current loss 0.10755850011955559 higher than best loss 0.08753833367981123, early stop counter 1----
+Epoch: 86, train_loss: 0.08399452237276042, test_loss: 0.09617447729541684, lr: [4.181203352191772e-06]
+----Current loss 0.09617447729541684 higher than best loss 0.08753833367981123, early stop counter 2----
+Epoch: 87, train_loss: 0.08640748160187064, test_loss: 0.10472201612367416, lr: [4.181203352191772e-06]
+----Current loss 0.10472201612367416 higher than best loss 0.08753833367981123, early stop counter 3----
+Epoch: 88, train_loss: 0.08163653241425026, test_loss: 0.10780669963263989, lr: [4.181203352191772e-06]
+----Current loss 0.10780669963263989 higher than best loss 0.08753833367981123, early stop counter 4----
+Epoch: 89, train_loss: 0.0834139225232165, test_loss: 0.10123612859766773, lr: [4.181203352191772e-06]
+----Current loss 0.10123612859766773 higher than best loss 0.08753833367981123, early stop counter 5----
+Saving prediction for epoch 90
+Epoch: 90, train_loss: 0.08287612307907605, test_loss: 0.11770586443046538, lr: [4.181203352191772e-06]
+----Current loss 0.11770586443046538 higher than best loss 0.08753833367981123, early stop counter 6----
+Epoch: 91, train_loss: 0.08737855636310286, test_loss: 0.10302412719400911, lr: [3.972143184582183e-06]
+----Current loss 0.10302412719400911 higher than best loss 0.08753833367981123, early stop counter 7----
+Epoch: 92, train_loss: 0.08294684630705089, test_loss: 0.10881003350961027, lr: [3.972143184582183e-06]
+----Current loss 0.10881003350961027 higher than best loss 0.08753833367981123, early stop counter 8----
+Epoch: 93, train_loss: 0.08603148939224278, test_loss: 0.09914386522092675, lr: [3.972143184582183e-06]
+----Current loss 0.09914386522092675 higher than best loss 0.08753833367981123, early stop counter 9----
+Epoch: 94, train_loss: 0.09103503941399295, test_loss: 0.11934586540510517, lr: [3.972143184582183e-06]
+----Current loss 0.11934586540510517 higher than best loss 0.08753833367981123, early stop counter 10----
+Epoch: 95, train_loss: 0.08507220715102626, test_loss: 0.11451107176851083, lr: [3.972143184582183e-06]
+----Current loss 0.11451107176851083 higher than best loss 0.08753833367981123, early stop counter 11----
+Epoch: 96, train_loss: 0.08813510939660596, test_loss: 0.1048858627809004, lr: [3.773536025353074e-06]
+----Current loss 0.1048858627809004 higher than best loss 0.08753833367981123, early stop counter 12----
+Epoch: 97, train_loss: 0.08400681669392236, test_loss: 0.09824295681001205, lr: [3.773536025353074e-06]
+----Current loss 0.09824295681001205 higher than best loss 0.08753833367981123, early stop counter 13----
+Epoch: 98, train_loss: 0.08630247723038603, test_loss: 0.11561719022661876, lr: [3.773536025353074e-06]
+----Current loss 0.11561719022661876 higher than best loss 0.08753833367981123, early stop counter 14----
+Epoch: 99, train_loss: 0.08861949026766347, test_loss: 0.1130122736605621, lr: [3.773536025353074e-06]
+----Current loss 0.1130122736605621 higher than best loss 0.08753833367981123, early stop counter 15----
+Saving prediction for epoch 100
+Epoch: 100, train_loss: 0.08611081022678352, test_loss: 0.10543282343666371, lr: [3.773536025353074e-06]
+----Current loss 0.10543282343666371 higher than best loss 0.08753833367981123, early stop counter 16----
+Epoch: 101, train_loss: 0.08732987431491293, test_loss: 0.09710876972157512, lr: [3.58485922408542e-06]
+----Current loss 0.09710876972157512 higher than best loss 0.08753833367981123, early stop counter 17----
+Epoch: 102, train_loss: 0.08645369198809309, test_loss: 0.10373161864092939, lr: [3.58485922408542e-06]
+----Current loss 0.10373161864092939 higher than best loss 0.08753833367981123, early stop counter 18----
+Epoch: 103, train_loss: 0.08417034789738131, test_loss: 0.10348461042256935, lr: [3.58485922408542e-06]
+----Current loss 0.10348461042256935 higher than best loss 0.08753833367981123, early stop counter 19----
+Epoch: 104, train_loss: 0.08426693804198648, test_loss: 0.1055198480248345, lr: [3.58485922408542e-06]
+----Current loss 0.1055198480248345 higher than best loss 0.08753833367981123, early stop counter 20----
+Epoch: 105, train_loss: 0.08267613205059272, test_loss: 0.10154793554823716, lr: [3.58485922408542e-06]
+----Current loss 0.10154793554823716 higher than best loss 0.08753833367981123, early stop counter 21----
+Epoch: 106, train_loss: 0.087857860821958, test_loss: 0.0975754159541995, lr: [3.405616262881149e-06]
+----Current loss 0.0975754159541995 higher than best loss 0.08753833367981123, early stop counter 22----
+Epoch: 107, train_loss: 0.08752213418483734, test_loss: 0.09253818747727577, lr: [3.405616262881149e-06]
+----Current loss 0.09253818747727577 higher than best loss 0.08753833367981123, early stop counter 23----
+Epoch: 108, train_loss: 0.08809168850321596, test_loss: 0.09684465723284541, lr: [3.405616262881149e-06]
+----Current loss 0.09684465723284541 higher than best loss 0.08753833367981123, early stop counter 24----
+Epoch: 109, train_loss: 0.08500016907729753, test_loss: 0.09615195129000398, lr: [3.405616262881149e-06]
+Early stopping
+----Current loss 0.09615195129000398 higher than best loss 0.08753833367981123, early stop counter 25----
+MSE: 0.14913785457611084, MAE: 0.31101855635643005

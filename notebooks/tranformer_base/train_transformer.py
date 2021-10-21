@@ -47,9 +47,9 @@ def train(config, checkpoint_dir):
             model = nn.DataParallel(model)
     model.to(device)
     epochs = 300        
-    criterion = nn.MSELoss()
+    criterion = nn.MSELoss() ######MAELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, 20, gamma=0.95, last_epoch = epochs-1   )
+    scheduler = optim.lr_scheduler.StepLR(optimizer, 20, gamma=0.95, last_epoch = epochs-1 )
     #writer = tensorboard.SummaryWriter('./test_logs')
     
     # if checkpoint_dir:
@@ -74,8 +74,6 @@ def train(config, checkpoint_dir):
             loss.backward()
             optimizer.step()
             
-            
-
         val_loss = evaluate(model, val_loader, criterion)
         print(f'Epoch: {epoch}, train_loss: {total_loss}, val_loss: {val_loss}')
         #writer.add_scalar('train_loss',total_loss,epoch)

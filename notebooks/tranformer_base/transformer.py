@@ -20,18 +20,18 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 class Tranformer(nn.Module):
-    def __init__(self,feature_size=250,num_layers=1,dropout=0.1,num_head=2):
+    def __init__(self,feature_size=250,num_enc_layers=1,num_dec_layers=1,d_ff = 256, dropout=0.1,num_head=2):
         super(Tranformer, self).__init__()
         self.model_type = 'Transformer'
         
         self.src_mask = None
         self.pos_encoder = PositionalEncoding(feature_size)
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=feature_size, \
-            nhead=num_head, dropout=dropout, dim_feedforward = 4*feature_size)
-        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)      
+            nhead=num_head, dropout=dropout, dim_feedforward = d_ff)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_enc_layers)      
         self.decoder_layer = nn.TransformerDecoderLayer(d_model=feature_size, \
-            nhead=num_head, dropout=dropout, dim_feedforward = 4*feature_size)  
-        self.decoder_layer = nn.TransformerDecoder(self.decoder_layer, num_layers=num_layers)
+            nhead=num_head, dropout=dropout, dim_feedforward = d_ff)  
+        self.transformer_decoder = nn.TransformerDecoder(self.decoder_layer, num_layers=num_dec_layers)
         self.decoder = nn.Linear(feature_size,1)
         self.init_weights()
 
@@ -40,16 +40,28 @@ class Tranformer(nn.Module):
         self.decoder.bias.data.zero_()
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self,src):
+    def forward(self,src, tgt):
+        src = src.permute(1,0,2)
+        tgt = tgt.permute(1,0,2)
+        #print(f'src shape {src.shape}, tgt shape: {tgt.shape}')
         if self.src_mask is None or self.src_mask.size(0) != len(src):
             device = src.device
-            mask = self._generate_square_subsequent_mask(len(src)).to(device)
+            mask = self._generate_square_subsequent_mask(src.shape[0]).to(device)
             self.src_mask = mask
-
         src = self.pos_encoder(src)
-        output = self.transformer_encoder(src,self.src_mask)#, self.src_mask)
-        output = self.decoder(output)
-        return output
+        tgt = self.pos_encoder(tgt)
+        #print(f'after pe src shape {src.shape}, tgt shape: {tgt.shape}')
+
+        output_enc = self.transformer_encoder(src,self.src_mask) 
+        #print(f'after enc src shape {src.shape}, tgt shape: {tgt.shape}')
+
+        output_dec = self.transformer_decoder(tgt,output_enc,self.src_mask)
+        #print(f'after dec src shape {src.shape}, tgt shape: {tgt.shape}')
+
+        output = self.decoder(output_dec)
+
+        #print('output shape: ',output.shape)
+        return output.permute(1,0,2)
 
     def _generate_square_subsequent_mask(self, sz):
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
