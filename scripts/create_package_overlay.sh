@@ -34,6 +34,8 @@ conda activate /ext3/conda/bootcamp
 conda install -y pytest
 conda install -c conda-forge -y hydra-core omegaconf openssh
 pip install pytorch-lightning
+pip install -U ray
+pip install -U ray[tune]
 
 cat << 'EOFBASHRC' >> ~/.bashrc
 if [[ -f ~/environment.sh ]]; then
