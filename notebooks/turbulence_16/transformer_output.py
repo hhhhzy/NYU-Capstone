@@ -110,7 +110,7 @@ class early_stopping():
 
 
 if __name__ == "__main__":
-    root_dir = '/scratch/yd1008/nyu-capstone/tune_results'
+    root_dir = '/scratch/zh2095/nyu-capstone/tune_results'
     best_config = {'feature_size': 512, 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 512, 'dropout': 0.1, 'window_size': 144}
     train_proportion = 0.6
     test_proportion = 0.2
@@ -139,7 +139,7 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
-    writer = tensorboard.SummaryWriter('/scratch/yd1008/tensorboard_output/')
+    writer = tensorboard.SummaryWriter('/scratch/zh2095/tensorboard_output/')
     
     # if checkpoint_dir:
     #     checkpoint = os.path.join(checkpoint_dir, "checkpoint")
