@@ -20,20 +20,23 @@ def get_rho(data_path):
         rho.append(d['rho'])
 
     rho = np.array(rho)
-    rho_reshaped = np.reshape(rho, (-1, 16))
+    ntime, nx1, nx2, nx3 = np.shape(rho)
+    rho_reshaped = rho.flatten()
     
-    return rho_reshaped
+    return rho_reshaped, (nx1,nx2,nx3)
 
-def to_windowed(data,window_size,pred_size):
+def to_windowed(data,meshed_blocks,window_size,pred_size):
+    nx1, nx2, nx3 = meshed_blocks
+    n = nx1*nx2*nx3
     out = []
-    for i in range(len(data)-256*window_size):
-        feature  = np.array(data[[i+256*k for k in range(window_size)]])
-        target = np.array(data[[i+256*(k+pred_size) for k in range(window_size)]])        
+    for i in range(len(data)-n*window_size):
+        feature  = np.array(data[[i+n*k for k in range(window_size)]])
+        target = np.array(data[[i+n*(k+pred_size) for k in range(window_size)]])        
         out.append((feature,target))
-        
+
     return np.array(out)
 
-def train_test_val_split(x_vals ,train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
+def train_test_val_split(x_vals , meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
               , window_size = 12, pred_size = 1):
 
     total_len = len(x_vals)
@@ -46,9 +49,9 @@ def train_test_val_split(x_vals ,train_proportion = 0.6, val_proportion = 0.2, t
     val_data = x_vals[train_len:(train_len+val_len)]
     test_data = x_vals[(train_len+val_len):]
 
-    train = to_windowed(train_data,window_size,pred_size)
-    val = to_windowed(val_data,window_size,pred_size)
-    test = to_windowed(test_data,window_size,pred_size)
+    train = to_windowed(train_data,meshed_blocks,window_size,pred_size)
+    val = to_windowed(val_data,meshed_blocks,window_size,pred_size)
+    test = to_windowed(test_data,meshed_blocks,window_size,pred_size)
 
     train = torch.from_numpy(train).float()
     val = torch.from_numpy(val).float()
@@ -64,7 +67,7 @@ class CustomDataset(torch.utils.data.Dataset):
         return len(self.x)
  
     def __getitem__(self,idx):
-        return(self.x[idx][0], self.x[idx][1])
+        return(self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1))
     
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25,window_size = 10, \
     pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, test_mode = False): 
@@ -73,10 +76,10 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
     np.random.seed(505)
     
     data_path='C:/Users/52673/Desktop/NYU MSDS/3-DS-1006 CAPSTONE/data_turb_dedt1_16'
-    data = get_rho(data_path)
+    data, meshed_blocks = get_rho(data_path)
     
-    train_data,val_data,test_data,train_original,val_original,test_original, scaler = train_test_val_split(\
-        data ,train_proportion = train_proportion\
+    train_data,val_data,test_data,train_original,val_original,test_original = train_test_val_split(\
+        data , meshed_blocks,train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
         , window_size = window_size, pred_size = pred_size)
     if test_mode:
