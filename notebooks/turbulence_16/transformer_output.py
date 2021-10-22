@@ -150,7 +150,7 @@ if __name__ == "__main__":
     train_loader, test_loader = get_data_loaders(train_proportion, test_proportion, val_proportion,\
          window_size=window_size, pred_size =1, batch_size=batch_size, num_workers = 2, pin_memory = False, test_mode = True)
 
-    epochs = 800
+    epochs = 10
     train_losses = []
     test_losses = []
     tolerance = 10
