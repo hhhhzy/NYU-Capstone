@@ -3,9 +3,7 @@ import os
 import numpy as np
 import torch 
 import torch.nn as nn
-from sklearn.preprocessing import StandardScaler
 from _arfima import arfima
-from mlp import MLP
 from utils import *
 from athena_read import *
 

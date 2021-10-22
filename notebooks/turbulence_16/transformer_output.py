@@ -110,7 +110,7 @@ class early_stopping():
 
 
 if __name__ == "__main__":
-    root_dir = '/scratch/zh2095/nyu-capstone/turbulence_16/tune_results'
+    root_dir = '/scratch/zh2095/nyu-capstone/notebooks/turbulence_16/tune_results'
     best_config = {'feature_size': 512, 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 512, 'dropout': 0.1, 'window_size': 10}
     train_proportion = 0.5
     test_proportion = 0.25
@@ -172,7 +172,7 @@ if __name__ == "__main__":
             optimizer.step()
 
 
-        if (epoch%10 == 0):
+        if (epoch%5 == 0):
             print(f'Saving prediction for epoch {epoch}')
             predict_model(model, test_loader, window_size, epoch, plot=True)    
 
