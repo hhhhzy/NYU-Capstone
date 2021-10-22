@@ -110,11 +110,11 @@ class early_stopping():
 
 
 if __name__ == "__main__":
-    root_dir = '/scratch/zh2095/nyu-capstone/tune_results'
-    best_config = {'feature_size': 512, 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 512, 'dropout': 0.1, 'window_size': 144}
-    train_proportion = 0.6
-    test_proportion = 0.2
-    val_proportion = 0.2
+    root_dir = '/scratch/zh2095/nyu-capstone/turbulence_16/tune_results'
+    best_config = {'feature_size': 512, 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 512, 'dropout': 0.1, 'window_size': 10}
+    train_proportion = 0.5
+    test_proportion = 0.25
+    val_proportion = 0.25
     feature_size = best_config['feature_size']
     num_enc_layers = best_config['num_enc_layers']
     num_dec_layers = best_config['num_dec_layers']

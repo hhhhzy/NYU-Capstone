@@ -28,15 +28,15 @@ def evaluate(model,data_loader,criterion):
     return total_loss
 
 def train(config, checkpoint_dir):
-    train_proportion = 0.6
-    test_proportion = 0.2
-    val_proportion = 0.2
+    train_proportion = 0.5
+    test_proportion = 0.25
+    val_proportion = 0.25
     feature_size = config['feature_size']
     num_layer = config['num_layer']
     num_head = config['num_head']
     dropout = config['dropout']
     lr = 0.0001#config['lr']
-    window_size = 12#config['window_size']
+    window_size = 10#config['window_size']
     batch_size = 16#config['batch_size']
     
     model = Tranformer(feature_size=feature_size,num_layers=num_layer,dropout=dropout,num_head=num_head)
@@ -50,7 +50,7 @@ def train(config, checkpoint_dir):
     criterion = nn.MSELoss() ######MAELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, 20, gamma=0.95, last_epoch = epochs-1 )
-    #writer = tensorboard.SummaryWriter('./test_logs')
+    writer = tensorboard.SummaryWriter('./test_logs')
     
     # if checkpoint_dir:
     #     checkpoint = os.path.join(checkpoint_dir, "checkpoint")
@@ -76,8 +76,10 @@ def train(config, checkpoint_dir):
             
         val_loss = evaluate(model, val_loader, criterion)
         print(f'Epoch: {epoch}, train_loss: {total_loss}, val_loss: {val_loss}')
-        #writer.add_scalar('train_loss',total_loss,epoch)
-        #writer.add_scalar('val_loss',val_loss,epoch)
+        
+        writer.add_scalar('train_loss',total_loss,epoch)
+        writer.add_scalar('val_loss',val_loss,epoch)
+        
         tune.report(val_loss=val_loss)
         scheduler.step() 
 
@@ -98,7 +100,7 @@ if __name__ == "__main__":
             grace_period=20,
             reduction_factor=2)
     analysis = tune.run(tune.with_parameters(train), config=config, metric='val_loss', mode='min',\
-         scheduler=sched, resources_per_trial={"cpu": 32,"gpu": 4},local_dir="/scratch/yd1008/ray_results",)
+         scheduler=sched, resources_per_trial={"cpu": 32,"gpu": 4},local_dir="/scratch/zh2095/ray_results",)
 
     best_trail = analysis.get_best_config(mode='min')
     print('The best configs are: ',best_trail)
