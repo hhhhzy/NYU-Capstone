@@ -12,6 +12,7 @@ from transformer import Tranformer
 from utils import *
 
 
+
 def evaluate(model,data_loader,criterion):
     model.eval()
     total_loss = 0.
@@ -23,7 +24,7 @@ def evaluate(model,data_loader,criterion):
             model = nn.DataParallel(model)
     for (data,targets) in data_loader:
         data, targets = data.to(device), targets.to(device)
-        output = model(data)
+        output = model(data, targets)
         total_loss += criterion(output, targets).detach().cpu().numpy()
     return total_loss
 
@@ -32,24 +33,29 @@ def train(config, checkpoint_dir):
     test_proportion = 0.25
     val_proportion = 0.25
     feature_size = config['feature_size']
-    num_layer = config['num_layer']
+    num_enc_layers = config['num_enc_layers']
+    num_dec_layers = config['num_dec_layers']
     num_head = config['num_head']
     dropout = config['dropout']
-    lr = 0.0001#config['lr']
+    d_ff = config['d_ff']
+    lr = 1e-5#config['lr']
+    d_ff = 512
     window_size = 10#config['window_size']
     batch_size = 16#config['batch_size']
     
-    model = Tranformer(feature_size=feature_size,num_layers=num_layer,dropout=dropout,num_head=num_head)
+    #model = Tranformer(feature_size=feature_size,num_layers=num_layer,dropout=dropout,num_head=num_head)
+    model = Tranformer(feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
+            d_ff = d_ff, dropout=dropout,num_head=num_head)
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda:0"
         if torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
     model.to(device)
-    epochs = 300        
+    epochs = 10        
     criterion = nn.MSELoss() ######MAELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, 20, gamma=0.95, last_epoch = epochs-1 )
+    scheduler = optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
     writer = tensorboard.SummaryWriter('./test_logs')
     
     # if checkpoint_dir:
@@ -65,10 +71,10 @@ def train(config, checkpoint_dir):
         model.train() 
         total_loss = 0.
 
-        for (data, targets) in train_loader:
+        for i, (data, targets) in enumerate(train_loader):
             data, targets = data.to(device), targets.to(device)
             optimizer.zero_grad()
-            output = model(data)
+            output = model(data, targets) 
             loss = criterion(output, targets)
             total_loss += loss.item()
             loss.backward()
@@ -87,9 +93,11 @@ def train(config, checkpoint_dir):
 if __name__ == "__main__":
     config = {
         'feature_size':tune.grid_search([16,32,64,128]),
-        'num_layer':tune.grid_search([2,4,8]),
+        'num_enc_layers':tune.grid_search([1,2]),
+        'num_dec_layers':tune.grid_search([1,2]),
         'num_head':tune.grid_search([2,4,8]),
         'dropout':tune.grid_search([0.1,0.2]),
+        'd_ff':tune.grid_search([512])
         #'lr':tune.grid_search([0.0001]),
         #'window_size':tune.grid_search([12,36,108,324]),
         #'batch_size':tune.grid_search([16])
