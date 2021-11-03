@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import matplotlib.pyplot as plt
+import seaborn as sns
 import time
 from transformer import Tranformer
 from utils import *
@@ -72,14 +73,16 @@ def predict_model(model, test_loader, window_size, epoch, plot=True):
             test_result = torch.cat((test_result, output[:,-1,:].view(-1).detach().cpu()), 0)
             truth = torch.cat((truth, targets[:,-1,:].view(-1).detach().cpu()), 0)
             
+    
     if plot==True:
         fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
-        ax.plot(truth,color="blue")
-        ax.plot(test_result-truth,color="green")
-        ax.plot(test_result,color="red")
-        ax.grid(True, which='both')
-        ax.axhline(y=0, color='k')
-        fig.savefig(root_dir+f'/figs/transformer_epoch{epoch}_pred.png')
+        ax.plot(test_result[:1000],label='forecast')
+        ax.plot(truth[:1000],label = 'truth')
+        ax.plot(test_result[:1000]-truth[:1000],ls='--',label='residual')
+        #ax.grid(True, which='both')
+        ax.axhline(y=0)
+        ax.legend(loc="upper right")
+        fig.savefig(root_dir + f'/figs/transformer_epoch{epoch}_pred.png')
         plt.close(fig)
 
 class early_stopping():
@@ -110,7 +113,10 @@ class early_stopping():
 
 
 if __name__ == "__main__":
+    print(f'Pytorch version {torch.__version__}')
     root_dir = '/scratch/zh2095/nyu-capstone/notebooks/turbulence_16/tune_results'
+    sns.set_style("whitegrid")
+    sns.set_palette(['#57068c','#E31212','#01AD86'])
     # best_config = {'feature_size': 512, 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 512, 'dropout': 0.1, 'window_size': 10}
     best_config = {'feature_size': 128, 'num_enc_layers': 1, 'num_dec_layers': 1, 'num_head': 2, 'd_ff': 512, 'dropout': 0.1, 'window_size': 10}
     train_proportion = 0.5
@@ -122,7 +128,7 @@ if __name__ == "__main__":
     d_ff = best_config['d_ff']
     num_head = best_config['num_head']
     dropout = best_config['dropout']
-    lr = 1e-4 #best_config['lr']
+    lr = 1e-5 #best_config['lr']
     window_size = best_config['window_size']
     batch_size = 16#best_config['batch_size']
 
@@ -139,7 +145,8 @@ if __name__ == "__main__":
             
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
+    # scheduler = optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
     writer = tensorboard.SummaryWriter('/scratch/zh2095/tensorboard_output/')
     
     # if checkpoint_dir:
@@ -199,8 +206,8 @@ if __name__ == "__main__":
         writer.add_scalar('val_loss',test_loss,epoch)
 
 
-        if epoch%2 == 0:
-            scheduler.step() 
+        #if epoch%2 == 0:
+            #scheduler.step() 
 
 
 ### Plot losses        
@@ -244,13 +251,15 @@ if __name__ == "__main__":
             
     ### Plot prediction
     fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
-    ax.plot(truth,color="blue")
-    ax.plot(test_result-truth,color="green")
-    ax.plot(test_result,color="red")
-    ax.grid(True, which='both')
-    ax.axhline(y=0, color='k')
-    fig.savefig(root_dir + '/figs/transformer_pred.png')
+    ax.plot(test_result,label='forecast')
+    ax.plot(truth,label = 'truth')
+    ax.plot(test_result-truth,ls='--',label='residual')
+    #ax.grid(True, which='both')
+    ax.axhline(y=0)
+    ax.legend(loc="upper right")
+    fig.savefig(root_dir + 'figs/transformer_pred.png')
     plt.close(fig)
+
 
 ### Check MSE, MAE
     test_result = test_result.numpy()
