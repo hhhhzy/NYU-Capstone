@@ -55,7 +55,7 @@ def train_test_val_split(data , meshed_blocks, train_proportion = 0.6, test_prop
     val_data = torch.from_numpy(val).float()
     test_data = torch.from_numpy(test).float()
 
-    return train_data,val_data,test_data
+    return train_data,val_data,test_data,scaler
 
 class CustomDataset(torch.utils.data.Dataset):
     def __init__(self,x):
