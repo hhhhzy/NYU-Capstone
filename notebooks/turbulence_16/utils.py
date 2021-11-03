@@ -21,7 +21,7 @@ def get_rho(data_path):
     rho = np.array(rho)
     ntime, nx1, nx2, nx3 = np.shape(rho)
     rho_reshaped = rho.flatten()
-    
+
     return rho_reshaped, (nx1,nx2,nx3)
 
 def to_windowed(data,meshed_blocks,window_size,pred_size):
@@ -35,11 +35,12 @@ def to_windowed(data,meshed_blocks,window_size,pred_size):
 
     return np.array(out)
 
-def train_test_val_split(data , meshed_blocks, train_proportion = 0.6, test_proportion = 0.2, val_proportion = 0.2\
+def train_test_val_split(data , meshed_blocks, standardize = False, train_proportion = 0.6, test_proportion = 0.2, val_proportion = 0.2\
               , window_size = 12, pred_size = 1):
-
+    
     scaler = StandardScaler()
-    data = scaler.fit_transform(data.reshape(-1, 1)).reshape(-1)
+    if standardize == True:
+        data = scaler.fit_transform(data.reshape(-1, 1)).reshape(-1)
 
     x_vals = to_windowed(data, meshed_blocks,window_size,pred_size)
 

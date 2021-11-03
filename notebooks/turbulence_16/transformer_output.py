@@ -45,7 +45,7 @@ def evaluate(model,data_loader,criterion):
     return total_loss, test_rollout[:,-10:,:]
 
 def predict_model(model, test_loader, window_size, epoch, plot=True):
-    model.eval()
+    # model.eval()
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
     truth = torch.Tensor(0)
@@ -111,7 +111,8 @@ class early_stopping():
 
 if __name__ == "__main__":
     root_dir = '/scratch/zh2095/nyu-capstone/notebooks/turbulence_16/tune_results'
-    best_config = {'feature_size': 512, 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 512, 'dropout': 0.1, 'window_size': 10}
+    # best_config = {'feature_size': 512, 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 512, 'dropout': 0.1, 'window_size': 10}
+    best_config = {'feature_size': 128, 'num_enc_layers': 1, 'num_dec_layers': 1, 'num_head': 2, 'd_ff': 512, 'dropout': 0.1, 'window_size': 10}
     train_proportion = 0.5
     test_proportion = 0.25
     val_proportion = 0.25
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     d_ff = best_config['d_ff']
     num_head = best_config['num_head']
     dropout = best_config['dropout']
-    lr = 1e-5#best_config['lr']
+    lr = 1e-4 #best_config['lr']
     window_size = best_config['window_size']
     batch_size = 16#best_config['batch_size']
 
@@ -150,12 +151,12 @@ if __name__ == "__main__":
     train_loader, test_loader = get_data_loaders(train_proportion, test_proportion, val_proportion,\
          window_size=window_size, pred_size =1, batch_size=batch_size, num_workers = 2, pin_memory = False, test_mode = True)
 
-    epochs = 50
+    epochs = 10
     train_losses = []
     test_losses = []
     tolerance = 10
     best_test_loss = float('inf')
-    Early_Stopping = early_stopping(patience=25)
+    Early_Stopping = early_stopping(patience=2)
     for epoch in range(1, epochs + 1):
         model.train() 
         total_loss = 0.
@@ -172,7 +173,7 @@ if __name__ == "__main__":
             optimizer.step()
 
 
-        if (epoch%10 == 0):
+        if (epoch%2 == 0):
             print(f'Saving prediction for epoch {epoch}')
             predict_model(model, test_loader, window_size, epoch, plot=True)    
 
@@ -198,7 +199,7 @@ if __name__ == "__main__":
         writer.add_scalar('val_loss',test_loss,epoch)
 
 
-        if epoch%5 == 0:
+        if epoch%2 == 0:
             scheduler.step() 
 
 
@@ -214,7 +215,7 @@ if __name__ == "__main__":
     fig.savefig(root_dir + '/figs/transformer_test_loss.png')
     plt.close(fig)
 ### Predict
-    model.eval()
+    # model.eval()
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
     truth = torch.Tensor(0)
