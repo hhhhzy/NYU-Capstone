@@ -74,9 +74,9 @@ def predict_model(model, test_loader, window_size, epoch, plot=True):
             
     if plot==True:
         fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
+        ax.plot(test_result,color="red")
         ax.plot(truth,color="blue")
         ax.plot(test_result-truth,color="green")
-        ax.plot(test_result,color="red")
         ax.grid(True, which='both')
         ax.axhline(y=0, color='k')
         fig.savefig(root_dir+f'/figs/transformer_epoch{epoch}_pred.png')
@@ -113,8 +113,8 @@ if __name__ == "__main__":
     root_dir = '/scratch/zh2095/nyu-capstone/notebooks/turbulence_16/tune_results'
     best_config = {'feature_size': 512, 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 512, 'dropout': 0.1, 'window_size': 10}
     train_proportion = 0.5
-    test_proportion = 0.25
-    val_proportion = 0.25
+    test_proportion = 0.01
+    val_proportion = 0.49
     feature_size = best_config['feature_size']
     num_enc_layers = best_config['num_enc_layers']
     num_dec_layers = best_config['num_dec_layers']
@@ -136,83 +136,11 @@ if __name__ == "__main__":
     print('Using device: ',device)
     model.to(device)
             
-    criterion = nn.MSELoss()
-    optimizer = optim.AdamW(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
-    writer = tensorboard.SummaryWriter('/scratch/zh2095/tensorboard_output/')
-    
-    # if checkpoint_dir:
-    #     checkpoint = os.path.join(checkpoint_dir, "checkpoint")
-    #     model_state, optimizer_state = torch.load(checkpoint)
-    #     model.load_state_dict(model_state)
-    #     optimizer.load_state_dict(optimizer_state)
         
     train_loader, test_loader = get_data_loaders(train_proportion, test_proportion, val_proportion,\
          window_size=window_size, pred_size =1, batch_size=batch_size, num_workers = 2, pin_memory = False, test_mode = True)
 
-    epochs = 50
-    train_losses = []
-    test_losses = []
-    tolerance = 10
-    best_test_loss = float('inf')
-    Early_Stopping = early_stopping(patience=25)
-    for epoch in range(1, epochs + 1):
-        model.train() 
-        total_loss = 0.
-        
-        for i,(data, targets) in enumerate(train_loader):
 
-   
-            data, targets = data.to(device), targets.to(device)
-            optimizer.zero_grad()
-            output, truth = process_one_batch(data,targets)
-            loss = criterion(output[:,-1,:], targets[:,-1,:])
-            total_loss += loss.item()
-            loss.backward()
-            optimizer.step()
-
-
-        if (epoch%10 == 0):
-            print(f'Saving prediction for epoch {epoch}')
-            predict_model(model, test_loader, window_size, epoch, plot=True)    
-
-
-        train_losses.append(total_loss*batch_size)
-        test_loss, debug_output = evaluate(model, test_loader, criterion)
-        test_losses.append(test_loss/len(test_loader.dataset))
-
-
-        if epoch==1: ###DEBUG
-            print(f'Total of {len(train_loader.dataset)} samples in training set and {len(test_loader.dataset)} samples in test set')
-
-
-        print(f'Epoch: {epoch}, train_loss: {total_loss*batch_size/len(train_loader.dataset)}, test_loss: {test_loss/len(test_loader.dataset)}, lr: {scheduler.get_last_lr()}')
-
-
-        Early_Stopping(model, test_loss/len(test_loader))
-        if Early_Stopping.early_stop:
-            break
-
-
-        writer.add_scalar('train_loss',total_loss,epoch)
-        writer.add_scalar('val_loss',test_loss,epoch)
-
-
-        if epoch%5 == 0:
-            scheduler.step() 
-
-
-### Plot losses        
-    model = Early_Stopping.best_model
-    xs = np.arange(len(train_losses))
-    fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
-    ax.plot(xs,train_losses)
-    fig.savefig(root_dir + '/figs/transformer_train_loss.png')
-    plt.close(fig)
-    fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
-    ax.plot(xs,test_losses)
-    fig.savefig(root_dir + '/figs/transformer_test_loss.png')
-    plt.close(fig)
 ### Predict
     model.eval()
     test_rollout = torch.Tensor(0)   

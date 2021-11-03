@@ -92,17 +92,17 @@ def train(config, checkpoint_dir):
 
 if __name__ == "__main__":
     config = {
-        'feature_size':tune.grid_search([16,32,64,128]),
+        'feature_size':tune.grid_search([16,64,128]),
         'num_enc_layers':tune.grid_search([1,2]),
-        'num_dec_layers':tune.grid_search([1,2]),
+        'num_dec_layers':tune.grid_search([1]),
         'num_head':tune.grid_search([2,4,8]),
         'dropout':tune.grid_search([0.1,0.2]),
         'd_ff':tune.grid_search([512])
         #'lr':tune.grid_search([0.0001]),
         #'window_size':tune.grid_search([12,36,108,324]),
         #'batch_size':tune.grid_search([16])
-}
-    ray.init(ignore_reinit_error=False)
+}   
+    ray.init(ignore_reinit_error=False, include_dashboard=True, dashboard_host= '0.0.0.0')
     sched = ASHAScheduler(
             max_t=200,
             grace_period=20,

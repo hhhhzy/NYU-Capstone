@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --nodes=1 ### No change
+#SBATCH --nodes=2 ### No change
 #SBATCH --mem=36GB
 #SBATCH --cpus-per-task=8 ### No less than gpu
 #SBATCH --time=16:00:00
@@ -30,4 +30,4 @@ singularity exec --no-home -B $HOME/.ssh -B /scratch -B $PWD --nv \
     --overlay $TMP_OVERLAY \
     --overlay overlay-base.ext3:ro \
     --overlay overlay-packages.ext3:ro \
-    $IMAGE /bin/bash -c "source ~/.bashrc; conda activate /ext3/conda/bootcamp; python mlp_output.py"
+    $IMAGE /bin/bash -c "source ~/.bashrc; conda activate /ext3/conda/bootcamp; python test.py"
