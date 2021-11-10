@@ -60,7 +60,7 @@ def train(config, checkpoint_dir):
     #     optimizer.load_state_dict(optimizer_state)
         
     train_loader,val_loader, test_loader = get_data_loaders(train_proportion, test_proportion, val_proportion,\
-         window_size=window_size, pred_size =1, batch_size=batch_size, num_workers = 2, pin_memory = False)
+         window_size=window_size, pred_size =1, batch_size=batch_size, num_workers = 8, pin_memory = True)
 
     for epoch in range(1, epochs + 1):
         model.train() 
