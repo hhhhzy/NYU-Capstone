@@ -166,7 +166,7 @@ def train(config, checkpoint_dir):
         val_loss = evaluate(model, val_loader, criterion, input_type=input_type)
         print(f'Epoch: {epoch}, train_loss: {total_loss}, val_loss: {val_loss}', flush=True)
 
-        Early_Stopping(model, val_loss/len(val_loader))
+        Early_Stopping(model, val_loss/len(val_loader.dataset))
 
         counter_new = Early_Stopping.counter
         if counter_new != counter_old:
