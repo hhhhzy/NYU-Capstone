@@ -158,7 +158,7 @@ if __name__ == "__main__":
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     best_config = {'input_type': 'patch', 'pe_type': '3d_temporal', 'patch_size': 2, 'feature_size': 192, 'num_enc_layers': 1, 'num_dec_layers': 1,\
-                     'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'window_size': 10, 'lr':1e-5, 'batch_size': 256}
+                     'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9, 'window_size': 10, 'batch_size': 256}
     train_proportion = 0.6
     test_proportion = 0.2
     val_proportion = 0.2
@@ -173,6 +173,7 @@ if __name__ == "__main__":
     num_head = best_config['num_head']
     dropout = best_config['dropout']
     lr = best_config['lr']
+    lr_decay = best_config['lr_decay']
     window_size = best_config['window_size']
     batch_size = best_config['batch_size']
 
@@ -191,7 +192,7 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     # scheduler = optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=lr_decay)
     writer = tensorboard.SummaryWriter('/scratch/zh2095/tensorboard_output/')
         
         # if checkpoint_dir:
@@ -263,7 +264,7 @@ if __name__ == "__main__":
 
             counter_new = Early_Stopping.counter
             if counter_new != counter_old:
-                scheduler.step()
+                scheduler.step()  # update lr if early stop
                 counter_old = counter_new
 
             if Early_Stopping.early_stop:
