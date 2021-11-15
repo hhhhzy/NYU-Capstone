@@ -93,9 +93,9 @@ def train(config, checkpoint_dir):
     input_type = config['input_type']
     pe_type = config['pe_type']
     feature_size = config['feature_size']
-    num_enc_layers = config['num_enc_layers']
-    num_dec_layers = config['num_dec_layers']
-    num_head = config['num_head']
+    num_enc_layers = 1 #config['num_enc_layers']
+    num_dec_layers = 1 #config['num_dec_layers']
+    num_head = 2 #config['num_head']
     
     patch_size = 2
     dropout = 0.1 #config['dropout']
@@ -169,7 +169,7 @@ def train(config, checkpoint_dir):
         writer.add_scalar('train_loss',total_loss,epoch)
         writer.add_scalar('val_loss',val_loss,epoch)
         
-        tune.report(val_loss=val_loss, len=len(val_loader.dataset))
+        tune.report(val_loss=val_loss)
 
         Early_Stopping(model, val_loss/len(val_loader.dataset))
 
@@ -184,12 +184,12 @@ def train(config, checkpoint_dir):
 
 if __name__ == "__main__":
     config = {
-        'input_type':tune.grid_search(['time', 'batch']),
+        'input_type':tune.grid_search(['space', 'time', 'patch']),
         'pe_type':tune.grid_search(['1d','3d','3d_temporal']),
         'feature_size':tune.grid_search([192,768]),
-        'num_enc_layers':tune.grid_search([1]),
-        'num_dec_layers':tune.grid_search([1]),
-        'num_head':tune.grid_search([2,8]),
+        #'num_enc_layers':tune.grid_search([1]),
+        #'num_dec_layers':tune.grid_search([1]),
+        #'num_head':tune.grid_search([2,8]),
         #'dropout':tune.grid_search([0.1,0.2]),
         #'d_ff':tune.grid_search([512])
         #'lr':tune.grid_search([0.0001]),
