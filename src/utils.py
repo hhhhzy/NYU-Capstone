@@ -54,8 +54,16 @@ def to_windowed(data, meshed_blocks, window_size, pred_size, option='patch', pat
 
     elif option == 'patch':
         nx1, nx2, nx3 = meshed_blocks
-        length = len(data)-nx1*nx2*nx3*window_size-patch_size*(nx2*nx3+nx3+1)
-        for i in range(0, length, patch_size**3):
+        length = int((len(data)-nx1*nx2*nx3*window_size)/(patch_size**3))
+
+        vertices = []
+        for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
+            for i in range(nx1//patch_size):
+                for j in range(nx2//patch_size):
+                    for k in range(nx3//patch_size):
+                        vertices.append(t*nx1*nx2*nx3+patch_size*k+patch_size*nx1*j+patch_size*nx1*nx2*i)
+
+        for i in vertices:
             feature  = np.array(data[[i + time*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
                                 for time in range(window_size) for j in range(patch_size) for k in range(patch_size) for l in range(patch_size)]])
             target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
