@@ -112,8 +112,8 @@ def predict_model(model, test_loader, window_size, epoch, input_type='patch', pl
                 output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
 
                 test_rollout = torch.cat([test_rollout,output[:,-patch_size**3:,:].detach().cpu()],dim = 1)
-                test_result = torch.cat((test_result, output[:,-patch_size**3:,:].view(-1).detach().cpu()), 0)
-                truth = torch.cat((truth, tgt[:,-patch_size**3:,:].view(-1).detach().cpu()), 0)
+                test_result = torch.cat((test_result, output[:,-patch_size**3:,:].flatten().detach().cpu()), 0)
+                truth = torch.cat((truth, tgt[:,-patch_size**3:,:].flatten().detach().cpu()), 0)
         
         else:
             for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
@@ -131,8 +131,8 @@ def predict_model(model, test_loader, window_size, epoch, input_type='patch', pl
                 output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
 
                 test_rollout = torch.cat([test_rollout,output[:,-1:,:].detach().cpu()],dim = 1)
-                test_result = torch.cat((test_result, output[:,-1,:].view(-1).detach().cpu()), 0)
-                truth = torch.cat((truth, tgt[:,-1,:].view(-1).detach().cpu()), 0)
+                test_result = torch.cat((test_result, output[:,-1,:].flatten().detach().cpu()), 0)
+                truth = torch.cat((truth, tgt[:,-1,:].flatten().detach().cpu()), 0)
             
     
     if plot==True:
@@ -148,8 +148,9 @@ def predict_model(model, test_loader, window_size, epoch, input_type='patch', pl
         plt.close(fig)
 
     
-  
-    
+
+
+
 
 
 if __name__ == "__main__":
@@ -157,7 +158,7 @@ if __name__ == "__main__":
     root_dir = '/scratch/zh2095/tune_results'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
-    best_config = {'input_type': 'patch', 'pe_type': '3d_temporal', 'patch_size': 2, 'feature_size': 192, 'num_enc_layers': 1, 'num_dec_layers': 1,\
+    best_config = {'input_type': 'patch', 'pe_type': '1d', 'patch_size': 2, 'feature_size': 192, 'num_enc_layers': 1, 'num_dec_layers': 1,\
                      'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9, 'window_size': 10, 'batch_size': 256}
     train_proportion = 0.6
     test_proportion = 0.2
@@ -231,6 +232,11 @@ if __name__ == "__main__":
                     total_loss += loss.item()
                     loss.backward()
                     optimizer.step()
+
+                avg_train_loss = total_loss*batch_size/(len(train_loader.dataset)*patch_size**3)
+                total_test_loss, debug_output = evaluate(model, test_loader, criterion, input_type=input_type)
+                avg_test_loss = total_test_loss/(len(test_loader.dataset)*patch_size**3)
+
             else:
                 for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
                     src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
@@ -241,26 +247,26 @@ if __name__ == "__main__":
                     total_loss += loss.item()
                     loss.backward()
                     optimizer.step()
-
-
+                
+                avg_train_loss = total_loss*batch_size/len(train_loader.dataset)
+                total_test_loss, debug_output = evaluate(model, test_loader, criterion, input_type=input_type)
+                avg_test_loss = total_test_loss/len(test_loader.dataset)
+            
+            train_losses.append(avg_train_loss)
+            test_losses.append(avg_test_loss)
+            
+            
             if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
                 predict_model(model, test_loader, window_size, epoch, input_type=input_type, plot=True)    
 
-
-            train_losses.append(total_loss*batch_size)
-            test_loss, debug_output = evaluate(model, test_loader, criterion, input_type=input_type)
-            test_losses.append(test_loss/len(test_loader.dataset))
-
-
             if epoch==1: ###DEBUG
                 print(f'Total of {len(train_loader.dataset)} samples in training set and {len(test_loader.dataset)} samples in test set', flush=True)
 
-
-            print(f'Epoch: {epoch}, train_loss: {total_loss*batch_size/len(train_loader.dataset)}, test_loss: {test_loss/len(test_loader.dataset)}, lr: {scheduler.get_last_lr()}', flush=True)
+            print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, test_loss: {avg_test_loss}, lr: {scheduler.get_last_lr()}', flush=True)
             print(f'Training time for 1 epoch with pe type {pe_type} and input type {input_type}: , {time.time()-start_time}', flush=True)
 
-            Early_Stopping(model, test_loss/len(test_loader))
+            Early_Stopping(model, avg_test_loss)
 
             counter_new = Early_Stopping.counter
             if counter_new != counter_old:
@@ -271,12 +277,9 @@ if __name__ == "__main__":
                 break
 
 
-            writer.add_scalar('train_loss',total_loss,epoch)
-            writer.add_scalar('test_loss',test_loss,epoch)
+            writer.add_scalar('train_loss',avg_train_loss,epoch)
+            writer.add_scalar('test_loss',avg_test_loss,epoch)
 
-
-            #if epoch%2 == 0:
-                #scheduler.step() 
 
         #save model
         if os.path.exists(root_dir + '/best_model.pth'):  # checking if there is a file with this name
@@ -322,8 +325,8 @@ if __name__ == "__main__":
                 output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
 
                 test_rollout = torch.cat([test_rollout,output[:,-patch_size**3:,:].detach().cpu()],dim = 1)
-                test_result = torch.cat((test_result, output[:,-patch_size**3:,:].view(-1).detach().cpu()), 0)
-                truth = torch.cat((truth, tgt[:,-patch_size**3:,:].view(-1).detach().cpu()), 0)
+                test_result = torch.cat((test_result, output[:,-patch_size**3:,:].flatten().detach().cpu()), 0)
+                truth = torch.cat((truth, tgt[:,-patch_size**3:,:].flatten().detach().cpu()), 0)
         
         else:
             for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
@@ -341,8 +344,8 @@ if __name__ == "__main__":
                 output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
 
                 test_rollout = torch.cat([test_rollout,output[:,-1:,:].detach().cpu()],dim = 1)
-                test_result = torch.cat((test_result, output[:,-1,:].view(-1).detach().cpu()), 0)
-                truth = torch.cat((truth, tgt[:,-1,:].view(-1).detach().cpu()), 0)
+                test_result = torch.cat((test_result, output[:,-1,:].flatten().detach().cpu()), 0)
+                truth = torch.cat((truth, tgt[:,-1,:].flatten().detach().cpu()), 0)
 
     ### Plot prediction
     fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))

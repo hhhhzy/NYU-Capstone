@@ -148,6 +148,11 @@ def train(config, checkpoint_dir):
                 total_loss += loss.item()
                 loss.backward()
                 optimizer.step()
+
+            avg_train_loss = total_loss*batch_size/(len(train_loader.dataset)*patch_size**3)
+            total_val_loss = evaluate(model, val_loader, criterion, input_type=input_type, patch_size=patch_size)
+            avg_val_loss = total_val_loss*batch_size/(len(val_loader.dataset)*patch_size**3)
+        
         else:
             for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
                 src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
@@ -161,17 +166,19 @@ def train(config, checkpoint_dir):
                 loss.backward()
                 optimizer.step()
 
+            avg_train_loss = total_loss*batch_size/len(train_loader.dataset)
+            total_val_loss = evaluate(model, val_loader, criterion, input_type=input_type, patch_size=patch_size)
+            avg_val_loss = total_val_loss*batch_size/len(val_loader.dataset)
 
 
-        val_loss = evaluate(model, val_loader, criterion, input_type=input_type, patch_size=patch_size)
-        print(f'Epoch: {epoch}, train_loss: {total_loss}, val_loss: {val_loss}', flush=True)
+        print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, val_loss: {avg_val_loss}', flush=True)
 
-        writer.add_scalar('train_loss',total_loss,epoch)
-        writer.add_scalar('val_loss',val_loss,epoch)
+        writer.add_scalar('train_loss',avg_train_loss,epoch)
+        writer.add_scalar('val_loss',avg_val_loss,epoch)
         
-        tune.report(val_loss=val_loss)
+        tune.report(train_loss = avg_train_loss, val_loss=avg_val_loss)
 
-        Early_Stopping(model, val_loss/len(val_loader.dataset))
+        Early_Stopping(model, avg_val_loss)
 
         counter_new = Early_Stopping.counter
         if counter_new != counter_old:
