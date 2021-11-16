@@ -54,7 +54,7 @@ def process_one_batch_patch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts):
 
 
 def evaluate(model,data_loader,criterion, input_type='patch'):
-    # model.eval()    
+    model.eval()    
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
     truth = torch.Tensor(0)
@@ -85,8 +85,13 @@ def evaluate(model,data_loader,criterion, input_type='patch'):
 
 
 
-def predict_model(model, test_loader, window_size, epoch, input_type='patch', plot=True):
-    # model.eval()
+def predict_model(model, test_loader, window_size, epoch, input_type='patch', \
+                        plot=True, plot_range=[0,0.01], final_prediction=False):
+    '''
+    plot_range: [a,b], 0<=a<b<=1, where a is the proportion that determines the start point to plot, b determines the end point. 
+    final_prediction: True, if done with training and using the trained model to predict the final result
+    '''
+    model.eval()
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
     truth = torch.Tensor(0)
@@ -136,19 +141,24 @@ def predict_model(model, test_loader, window_size, epoch, input_type='patch', pl
             
     
     if plot==True:
-        # plot the last 1000 samples
+        # plot a part of the result
         fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
-        ax.plot(test_result[-1000:],label='forecast')
-        ax.plot(truth[-1000:],label = 'truth')
-        ax.plot(test_result[-1000:]-truth[-1000:],ls='--',label='residual')
+        plot_start = int(len(test_result)*plot_range[0])
+        plot_end = int(len(test_result)*plot_range[1])
+        ax.plot(test_result[plot_start:plot_end],label='forecast')
+        ax.plot(truth[plot_start:plot_end],label = 'truth')
+        ax.plot(test_result[plot_start:plot_end]-truth[plot_start:plot_end],ls='--',label='residual')
         #ax.grid(True, which='both')
         ax.axhline(y=0)
         ax.legend(loc="upper right")
-        fig.savefig(root_dir + f'/figs/epoch{epoch}_{pe_type}_{input_type}.png')
+        if final_prediction == True:
+            fig.savefig(root_dir + '/figs/transformer_pred.png')
+        else:
+            fig.savefig(root_dir + f'/figs/epoch{epoch}_{pe_type}_{input_type}.png')
         plt.close(fig)
 
-    
-
+    if final_prediction == True:
+        return test_result, truth
 
 
 
@@ -158,8 +168,8 @@ if __name__ == "__main__":
     root_dir = '/scratch/zh2095/tune_results'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
-    best_config = {'input_type': 'patch', 'pe_type': '1d', 'patch_size': 2, 'feature_size': 192, 'num_enc_layers': 1, 'num_dec_layers': 1,\
-                     'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9, 'window_size': 10, 'batch_size': 256}
+    best_config = {'input_type': 'patch', 'pe_type': '3d_temporal', 'patch_size': 2, 'feature_size': 768, 'num_enc_layers': 1, 'num_dec_layers': 1,\
+                     'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'lr': 1e-4, 'lr_decay': 0.1, 'window_size': 10, 'batch_size': 256}
     train_proportion = 0.6
     test_proportion = 0.2
     val_proportion = 0.2
@@ -192,7 +202,6 @@ if __name__ == "__main__":
                 
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
-    # scheduler = optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=lr_decay)
     writer = tensorboard.SummaryWriter('/scratch/zh2095/tensorboard_output/')
         
@@ -258,7 +267,8 @@ if __name__ == "__main__":
             
             if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
-                predict_model(model, test_loader, window_size, epoch, input_type=input_type, plot=True)    
+                predict_model(model, test_loader, window_size, epoch, input_type='patch', \
+                                    plot=True, plot_range=[0,0.01], final_prediction=False)   
 
             if epoch==1: ###DEBUG
                 print(f'Total of {len(train_loader.dataset)} samples in training set and {len(test_loader.dataset)} samples in test set', flush=True)
@@ -280,7 +290,6 @@ if __name__ == "__main__":
             writer.add_scalar('train_loss',avg_train_loss,epoch)
             writer.add_scalar('test_loss',avg_test_loss,epoch)
 
-
         #save model
         if os.path.exists(root_dir + '/best_model.pth'):  # checking if there is a file with this name
             os.remove(root_dir + '/best_model.pth')  # deleting the file
@@ -298,73 +307,22 @@ if __name__ == "__main__":
     ax.plot(xs,test_losses)
     fig.savefig(root_dir + f'/figs/test_loss_{pe_type}_{input_type}.png')
     plt.close(fig)
+
 ### Predict
-    # model.eval()
-    test_rollout = torch.Tensor(0)   
-    test_result = torch.Tensor(0)  
-    truth = torch.Tensor(0)
-    device = "cpu"
-    if torch.cuda.is_available():
-        device = "cuda:0"
-        if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
-    with torch.no_grad():
-        if input_type == 'patch':
-            for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
-                if i == 0:
-                    enc_in = src
-                    dec_in = tgt
-                    test_rollout = tgt
-                else:
-                    enc_in = test_rollout[:,-tgt.shape[1]:,:]
-                    dec_in = torch.zeros([enc_in.shape[0], patch_size**3, enc_in.shape[-1]]).float()
-                    dec_in = torch.cat([enc_in[:,:(tgt.shape[1]-patch_size**3),:], dec_in], dim=1).float()
-                    #dec_in = enc_in[:,:(window_size-1),:]
-                enc_in, dec_in, tgt = enc_in.to(device), dec_in.to(device), tgt.to(device)
-                src_coord, tgt_coord, src_ts, tgt_ts = src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-                output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
-
-                test_rollout = torch.cat([test_rollout,output[:,-patch_size**3:,:].detach().cpu()],dim = 1)
-                test_result = torch.cat((test_result, output[:,-patch_size**3:,:].flatten().detach().cpu()), 0)
-                truth = torch.cat((truth, tgt[:,-patch_size**3:,:].flatten().detach().cpu()), 0)
-        
-        else:
-            for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
-                if i == 0:
-                    enc_in = src
-                    dec_in = tgt
-                    test_rollout = tgt
-                else:
-                    enc_in = test_rollout[:,-window_size:,:]
-                    dec_in = torch.zeros([enc_in.shape[0], 1, enc_in.shape[-1]]).float()
-                    dec_in = torch.cat([enc_in[:,:(window_size-1),:], dec_in], dim=1).float()
-                    #dec_in = enc_in[:,:(window_size-1),:]
-                enc_in, dec_in, tgt = enc_in.to(device), dec_in.to(device), tgt.to(device)
-                src_coord, tgt_coord, src_ts, tgt_ts = src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-                output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
-
-                test_rollout = torch.cat([test_rollout,output[:,-1:,:].detach().cpu()],dim = 1)
-                test_result = torch.cat((test_result, output[:,-1,:].flatten().detach().cpu()), 0)
-                truth = torch.cat((truth, tgt[:,-1,:].flatten().detach().cpu()), 0)
-
-    ### Plot prediction
-    fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
-    ax.plot(truth,label = 'truth')
-    ax.plot(test_result,label='forecast')
-    ax.plot(test_result-truth,ls='--',label='residual')
-    #ax.grid(True, which='both')
-    ax.axhline(y=0)
-    ax.legend(loc="upper right")
-    fig.savefig(root_dir + '/figs/transformer_pred.png')
-    plt.close(fig)
-
+    start_time = time.time()
+    test_result, truth = predict_model(model, test_loader, window_size, epoch, input_type='patch', \
+                                            plot=True, plot_range=[0,1], final_prediction=True)     
+    print('-'*20 + ' Measure for Simulation Speed ' + '-'*20)
+    print(f'Time to forcast {len(test_result)} samples: {time.time()-start_time}' )
 
 ### Check MSE, MAE
     test_result = test_result.numpy()
     truth = truth.numpy()
     MSE = mean_squared_error(truth, test_result)
     MAE = mean_absolute_error(truth, test_result)
+    print('-'*20 + ' Measure for Simulation Performance ' + '-'*20)
     print(f'MSE: {MSE}, MAE: {MAE}')
+
 ### Save model result
     test_result_df = pd.DataFrame(test_result)
     test_result_df.to_csv(root_dir + '/transformer_prediction.csv')
