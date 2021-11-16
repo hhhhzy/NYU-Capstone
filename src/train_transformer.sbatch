@@ -3,7 +3,7 @@
 #SBATCH --nodes=1 ### No change
 #SBATCH --mem=36GB
 #SBATCH --cpus-per-task=8 ### No less than gpu
-#SBATCH --time=16:00:00
+#SBATCH --time=48:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --job-name=trts
 ##gpu:2 -c2 or gpu:k80:3 -c3
