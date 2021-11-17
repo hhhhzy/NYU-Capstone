@@ -108,7 +108,7 @@ class CustomDataset(torch.utils.data.Dataset):
         return len(self.x)
  
     def __getitem__(self,idx):
-        return((self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1)),(self.coords[idx][0], self.coords[idx][1]),(self.timestamp[idx][0], self.timestamp[idx][1]))
+        return((self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1)),(self.coords[idx][0], self.coords[idx][1]),(self.timestamp[idx][0].view(-1,1), self.timestamp[idx][1].view(-1,1)))
     
 # class CustomFeatureDataset(torch.utils.data.Dataset):
 #     def __init__(self,x):

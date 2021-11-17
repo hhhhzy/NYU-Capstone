@@ -89,7 +89,7 @@ def predict_model(model, test_loader, window_size, epoch, input_type='patch', \
                         plot=True, plot_range=[0,0.01], final_prediction=False):
     '''
     plot_range: [a,b], 0<=a<b<=1, where a is the proportion that determines the start point to plot, b determines the end point. 
-    final_prediction: True, if done with training and using the trained model to predict the final result
+    final_prediction: True, if done with training and using the trained/saved model to predict the final result
     '''
     model.eval()
     test_rollout = torch.Tensor(0)   
@@ -264,17 +264,17 @@ if __name__ == "__main__":
             train_losses.append(avg_train_loss)
             test_losses.append(avg_test_loss)
             
-            
-            if (epoch%2 == 0):
-                print(f'Saving prediction for epoch {epoch}', flush=True)
-                predict_model(model, test_loader, window_size, epoch, input_type='patch', \
-                                    plot=True, plot_range=[0,0.01], final_prediction=False)   
 
             if epoch==1: ###DEBUG
                 print(f'Total of {len(train_loader.dataset)} samples in training set and {len(test_loader.dataset)} samples in test set', flush=True)
 
             print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, test_loss: {avg_test_loss}, lr: {scheduler.get_last_lr()}', flush=True)
             print(f'Training time for 1 epoch with pe type {pe_type} and input type {input_type}: , {time.time()-start_time}', flush=True)
+
+            if (epoch%2 == 0):
+                print(f'Saving prediction for epoch {epoch}', flush=True)
+                predict_model(model, test_loader, window_size, epoch, input_type='patch', \
+                                    plot=True, plot_range=[0,0.01], final_prediction=False)   
 
             Early_Stopping(model, avg_test_loss)
 
