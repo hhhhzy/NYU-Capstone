@@ -103,7 +103,6 @@ class TemporalEmbedding(nn.Module):
         return torch.cat([v1, v2], 2)
 
     def forward(self, x):
-        x = x.unsqueeze(2)
         x = self.l1(x)
         x = self.fc1(x)
         return x
