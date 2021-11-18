@@ -148,9 +148,9 @@ def train(config, checkpoint_dir):
             loss.backward()
             optimizer.step()
 
-        avg_train_loss = total_loss*batch_size/(len(train_loader.dataset)*patch_size**3)
+        avg_train_loss = total_loss*batch_size*patch_size**3/len(train_loader.dataset)
         total_val_loss = evaluate(model, val_loader, criterion, input_type=input_type, patch_size=patch_size)
-        avg_val_loss = total_val_loss*batch_size/(len(val_loader.dataset)*patch_size**3)
+        avg_val_loss = total_val_loss*batch_size*patch_size**3/len(val_loader.dataset)
 
 
 

@@ -232,9 +232,9 @@ if __name__ == "__main__":
                 loss.backward()
                 optimizer.step()
 
-            avg_train_loss = total_loss*batch_size/(len(train_loader.dataset)*patch_size**3)
+            avg_train_loss = total_loss*batch_size*patch_size**3/len(train_loader.dataset)
             total_test_loss = evaluate(model, test_loader, criterion, input_type=input_type, patch_size=patch_size)
-            avg_test_loss = total_test_loss/(len(test_loader.dataset)*patch_size**3)
+            avg_test_loss = total_test_loss*patch_size**3/len(test_loader.dataset)
 
             
             train_losses.append(avg_train_loss)
@@ -250,7 +250,7 @@ if __name__ == "__main__":
             if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
                 predict_model(model, test_loader, epoch, input_type=input_type, patch_size=patch_size, \
-                                    plot=True, plot_range=[0,0.01], final_prediction=False)   
+                                    plot=True, plot_range=[0.5,0.51], final_prediction=False)   
 
             writer.add_scalar('train_loss',avg_train_loss,epoch)
             writer.add_scalar('test_loss',avg_test_loss,epoch)
