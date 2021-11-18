@@ -39,31 +39,33 @@ class PositionalEmbedding3D(nn.Module):
         div_term = (torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)).exp()
 
         pe_x = torch.zeros(max_len, d_model).float()
-        pe_x.require_grad = False
+        #pe_x.require_grad = False
         position_x = torch.arange(0, max_len).float().unsqueeze(1)#.unsqueeze(1)
         pe_x[:, 0::2] = torch.sin(position_x * div_term)
         pe_x[:, 1::2] = torch.cos(position_x * div_term)
         pe_x = pe_x[:grid_x,:].unsqueeze(1).unsqueeze(1)
 
         pe_y = torch.zeros(max_len, d_model).float()
-        pe_y.require_grad = False
+        #pe_y.require_grad = False
         position_y = torch.arange(0, max_len).float().unsqueeze(1)
         pe_y[:, 0::2] = torch.sin(position_y * div_term)
         pe_y[:, 1::2] = torch.cos(position_y * div_term)
         pe_y = pe_y[:grid_y,:].unsqueeze(1)
 
         pe_z = torch.zeros(max_len, d_model).float()
-        pe_z.require_grad = False
+        #pe_z.require_grad = False
         position_z = torch.arange(0, max_len).float().unsqueeze(1)
         pe_z[:, 0::2] = torch.sin(position_z * div_term)
         pe_z[:, 1::2] = torch.cos(position_z * div_term)
         pe_z = pe_z[:grid_z,:]
 
         pe = torch.zeros((grid_x,grid_y,grid_z,d_model_))
+        pe.require_grad = False
         pe[:,:,:,:d_model] = pe_x
         pe[:,:,:,d_model:2*d_model] = pe_y
         pe[:,:,:,2*d_model:] = pe_z
         self.register_buffer('pe', pe)
+
 
     def forward(self,batch):
         '''
@@ -73,8 +75,9 @@ class PositionalEmbedding3D(nn.Module):
         # pe3d = torch.zeros(batch_size, 1, 1, 1)
         coords = batch.view(-1,batch.shape[-1]).int()
         coords = coords.transpose(0,1).int()
-        xs,ys,zs = coords[0],coords[1],coords[2]
-        return torch.stack([self.pe[i,j,k] for i,j,k in zip(xs,ys,zs)]).view(batch.shape[0],-1,self.d_model_)
+        xs,ys,zs = coords[0].long(),coords[1].long(),coords[2].long()
+        return self.pe[xs,ys,zs].view(batch.shape[0],-1,self.d_model_)
+
 
 
 class TemporalEmbedding(nn.Module):
@@ -100,7 +103,6 @@ class TemporalEmbedding(nn.Module):
         return torch.cat([v1, v2], 2)
 
     def forward(self, x):
-        x = x.unsqueeze(2)
         x = self.l1(x)
         x = self.fc1(x)
         return x

@@ -52,7 +52,7 @@ def evaluate_old(model,data_loader,criterion):
 
 
 def evaluate(model,data_loader,criterion, input_type='patch', patch_size=2):
-    # model.eval()    
+    model.eval()    
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
     truth = torch.Tensor(0)
@@ -64,25 +64,19 @@ def evaluate(model,data_loader,criterion, input_type='patch', patch_size=2):
             model = nn.DataParallel(model)
     with torch.no_grad():
         if input_type == 'patch':
-            for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(data_loader):
-                src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
-                                                            src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-                dec_inp = torch.zeros([tgt.shape[0], patch_size**3, tgt.shape[-1]]).float().to(device)
-                dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-patch_size**3),:], dec_inp], dim=1).float().to(device)
-                output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
-                total_loss += criterion(output[:,-patch_size**3:,:], tgt[:,-patch_size**3:,:]).detach().cpu().numpy()
-        
+            patch_size = patch_size
         else:
-            for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(data_loader):
-                src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
+            patch_size = 1
+            
+        for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(data_loader):
+            src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                             src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-                dec_inp = torch.zeros([tgt.shape[0], 1, tgt.shape[-1]]).float().to(device)
-                dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-1),:], dec_inp], dim=1).float().to(device)
-                output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
-                total_loss += criterion(output[:,-1:,:], tgt[:,-1:,:]).detach().cpu().numpy()
-        
-    return total_loss
+            dec_inp = torch.zeros([tgt.shape[0], patch_size**3, tgt.shape[-1]]).float().to(device)
+            dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-patch_size**3),:], dec_inp], dim=1).float().to(device)
+            output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
+            total_loss += criterion(output[:,-patch_size**3:,:], tgt[:,-patch_size**3:,:]).detach().cpu().numpy()
 
+    return total_loss
 
 
 def train(config, checkpoint_dir):
@@ -100,7 +94,8 @@ def train(config, checkpoint_dir):
     patch_size = 2
     dropout = 0.1 #config['dropout']
     d_ff = 2048
-    lr = 1e-5 #config['lr']
+    lr = config['lr']
+    lr_decay = config['lr_decay']
     window_size = 10 #config['window_size']
     batch_size = 256 #config['batch_size']
     
@@ -119,7 +114,7 @@ def train(config, checkpoint_dir):
 
     criterion = nn.MSELoss() ######MAELoss()
     optimizer = optim.AdamW(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=lr_decay)
     writer = tensorboard.SummaryWriter('./test_logs')
     
     # if checkpoint_dir:
@@ -135,58 +130,54 @@ def train(config, checkpoint_dir):
     for epoch in range(1, epochs + 1):
         model.train() 
         total_loss = 0.
-           
+
         if input_type == 'patch':
-            for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
-                src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
-                                                                src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-                optimizer.zero_grad()
-                dec_inp = torch.zeros([tgt.shape[0], patch_size**3, tgt.shape[-1]]).float().to(device)
-                dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-patch_size**3),:], dec_inp], dim=1).float().to(device)
-                output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
-                loss = criterion(output[:,-patch_size**3:,:], tgt[:,-patch_size**3:,:])
-                total_loss += loss.item()
-                loss.backward()
-                optimizer.step()
+            patch_size = patch_size
         else:
-            for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
-                src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
+            patch_size = 1
+
+        for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
+            src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                                 src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-                optimizer.zero_grad()
-                dec_inp = torch.zeros([tgt.shape[0], 1, tgt.shape[-1]]).float().to(device)
-                dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-1),:], dec_inp], dim=1).float().to(device)
-                output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
-                loss = criterion(output[:,-1,:], tgt[:,-1,:])
-                total_loss += loss.item()
-                loss.backward()
-                optimizer.step()
+            optimizer.zero_grad()
+            dec_inp = torch.zeros([tgt.shape[0], patch_size**3, tgt.shape[-1]]).float().to(device)
+            dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-patch_size**3),:], dec_inp], dim=1).float().to(device)
+            output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
+            loss = criterion(output[:,-patch_size**3:,:], tgt[:,-patch_size**3:,:])
+            total_loss += loss.item()
+            loss.backward()
+            optimizer.step()
+
+        avg_train_loss = total_loss*batch_size*patch_size**3/len(train_loader.dataset)
+        total_val_loss = evaluate(model, val_loader, criterion, input_type=input_type, patch_size=patch_size)
+        avg_val_loss = total_val_loss*batch_size*patch_size**3/len(val_loader.dataset)
 
 
 
-        val_loss = evaluate(model, val_loader, criterion, input_type=input_type, patch_size=patch_size)
-        print(f'Epoch: {epoch}, train_loss: {total_loss}, val_loss: {val_loss}', flush=True)
-
-        writer.add_scalar('train_loss',total_loss,epoch)
-        writer.add_scalar('val_loss',val_loss,epoch)
+        print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, val_loss: {avg_val_loss}', flush=True)
         
-        tune.report(val_loss=val_loss)
+        tune.report(train_loss = avg_train_loss, val_loss=avg_val_loss)
 
-        Early_Stopping(model, val_loss/len(val_loader.dataset))
+        writer.add_scalar('train_loss',avg_train_loss,epoch)
+        writer.add_scalar('val_loss',avg_val_loss,epoch)
+
+        Early_Stopping(model, avg_val_loss)
 
         counter_new = Early_Stopping.counter
         if counter_new != counter_old:
             scheduler.step()
             counter_old = counter_new
-
         if Early_Stopping.early_stop:
             break
-
+        
 
 if __name__ == "__main__":
     config = {
         'input_type':tune.grid_search(['space', 'time', 'patch']),
         'pe_type':tune.grid_search(['1d','3d','3d_temporal']),
-        'feature_size':tune.grid_search([192,768]),
+        'lr':tune.grid_search([1e-4, 1e-5]),
+        'lr_decay':tune.grid_search([0.1, 0.9]),
+        'feature_size':tune.grid_search([768]),
         'num_enc_layers':tune.grid_search([1]),
         'num_dec_layers':tune.grid_search([1]),
         'num_head':tune.grid_search([2]),
