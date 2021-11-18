@@ -116,7 +116,7 @@ def predict_model(model, test_loader, epoch, input_type='patch', patch_size=2, \
             truth = torch.cat((truth, tgt[:,-patch_size**3:,:].flatten().detach().cpu()), 0)
             test_result = torch.cat((test_result, output[:,-patch_size**3:,:].flatten().detach().cpu()), 0)
 
-        a = torch.cat([test_ts.unsqueeze(-1), test_coord, truth.unsqueeze(-1), test_result.unsqueeze(-1)], dim=-1)
+        a = torch.cat([test_ts.unsqueeze(-1), test_coord, test_result.unsqueeze(-1), truth.unsqueeze(-1)], dim=-1)
         a = a.numpy()
         a = a[np.argsort(a[:, 3])]
         a = a[np.argsort(a[:, 2], kind='stable')]
