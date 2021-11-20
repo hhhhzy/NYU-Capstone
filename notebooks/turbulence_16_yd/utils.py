@@ -206,3 +206,137 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         #     return train_loader,val_loader, test_loader, train_coords_loader, test_coords_loader, val_coords_loader
 
         return train_loader,val_loader, test_loader
+
+img_dir = 'figs' ###dir to save images to
+pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) ###dir of csv file, or pandas dataframe
+
+
+grid_size = [16,16,16]
+axis_colnames = ['x1','x2','x3']
+slice_axis_index = 0
+pred_colname = 'prediction'
+truth_colname = 'truth'
+time_colname = 'time'
+
+
+def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], slice_axis_index=0, \
+                  pred_colname='prediction',truth_colname='truth', time_colname='time',  \
+                  plot_anime = True, img_dir = 'figs'):
+    '''
+    Parameters:
+        pred_df: string of dir of csv file or pandas.Dataframe, predictions with coordinates and time
+        grid_size: int or list-like, dimensions of one meshblock
+        axis_colnames: list of strings, column names of coordinates in pred_df
+        slice_axis_index: int, index of axis in axis_colnames to slice on 
+        pred_colname: string, column name of predictions in pred_df
+        truth_colname: string, column name of truths in pred_df
+        time_colname: string, column name of timestamps in pred_df
+        plot_anime: bool, animated plots will be saved if True 
+        img_dir: str, path to folder where plots are saved         
+    '''
+    if len(grid_size)!=3:
+        grid_size = [grid_size]*3
+    if type(pred_df)== str:
+        preds_all = pd.read_csv(pred_df,index_col=None)
+    else:
+        preds_all = pred_df
+        
+    predictions_per_simulation = np.prod(grid_size)
+    slice_axis_colname = axis_colnames[slice_axis_index]
+    #nonslice_axis_colname = axis_colnames.remove(slice_axis_colname)
+    slice_axis_shape = grid_size.pop(slice_axis_index)
+    nonslice_axis_shape = grid_size
+
+    timestamps = sorted(preds_all[time_colname].unique())
+    axis_vals = sorted(preds_all[slice_axis_colname].unique())
+
+    ### create a dict to save all values
+    result_dict = {}
+    print('Processing dataframe...')
+    for timestamp in timestamps:
+        single_simulation_df = preds_all.loc[(preds_all[time_colname]==timestamp)]
+        if single_simulation_df.shape[0]==predictions_per_simulation:
+            result_dict[timestamp] = {}
+            result_dict[timestamp]['slice_axis_val'] = []
+            result_dict[timestamp]['preds'] = []
+            result_dict[timestamp]['truth'] = []
+            for axis_val in axis_vals:
+                slice_df = single_simulation_df.loc[single_simulation_df[slice_axis_colname]==axis_val]
+                slice_preds = slice_df[pred_colname].values.reshape(nonslice_axis_shape)
+                slice_truth = slice_df[truth_colname].values.reshape(nonslice_axis_shape)
+                result_dict[timestamp]['slice_axis_val'].append(axis_val)
+                result_dict[timestamp]['preds'].append(slice_preds)
+                result_dict[timestamp]['truth'].append(slice_truth)    
+        else:
+            print(f'Found {single_simulation_df.shape[0]} predictions in simulation at timestamp {timestamp}, but expect {predictions_per_simulation}')
+
+    print('Generating plots...')
+    ### plot for each timestamp        
+    for ts_idx,ts in enumerate(list(result_dict.keys())):
+        fig,axes = plt.subplots(nrows = slice_axis_shape, ncols = 3, figsize=(40, 40),subplot_kw={'xticks': [], 'yticks': []})
+        #plt.setp(axes, ylim=(0, 14),xlim=(0,2))
+        plt.subplots_adjust(left=0.1,bottom=0, right=0.3, top=0.98, wspace=0, hspace=0.3)
+        axis_val = result_dict[ts]['slice_axis_val']
+        preds = result_dict[ts]['preds']
+        truth = result_dict[ts]['truth']
+        for i in range(slice_axis_shape):
+            if ts_idx==0:
+                axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=False)
+                #fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
+                axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=False)
+                #fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
+                axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=False)
+                #fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
+            else:
+                axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=True)
+                #fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
+                axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=True)
+                #fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
+                axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=True)
+                #fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
+
+        axes[-1,0].annotate('Forecast',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
+        axes[-1,1].annotate('Truth',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
+        axes[-1,2].annotate('Residual',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
+        #axes[-1,0].annotate('Slice number', (0, 0.5), xytext=(-50, 0), textcoords='offset points', xycoords='axes fraction', ha='left', va='center', size=15, rotation=90)
+        fig.suptitle(f'Forecasts on slices across {slice_axis_colname} at timestamp {ts}',x=0.2,y=1,size=20)
+        plt.savefig(img_dir+f'/ts_{ts}_result.png', bbox_inches="tight")
+        plt.close()
+        
+    if plot_anime:
+        imgs = []
+        fig,axes = plt.subplots(nrows = slice_axis_shape, ncols = 3, figsize=(40, 40),subplot_kw={'xticks': [], 'yticks': []})
+        plt.subplots_adjust(left=0.1,bottom=0, right=0.3, top=0.98, wspace=0, hspace=0.3)
+        print('Generating animation...')
+        for ts_idx,ts in enumerate(list(result_dict.keys())):
+            axis_val = result_dict[ts]['slice_axis_val']
+            preds = result_dict[ts]['preds']
+            truth = result_dict[ts]['truth']
+            tmp_imgs = []
+            for i in range(slice_axis_shape):
+                if ts_idx==0:
+                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=False)
+                    axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
+                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=False)
+                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=False)
+                else:
+                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=True)
+                    axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
+                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=True)
+                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=True)
+                    tmp_imgs.extend([im_pred,im_truth,im_residual])
+            imgs.append(tmp_imgs)
+        axes[-1,0].annotate('Forecast',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
+        axes[-1,1].annotate('Truth',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
+        axes[-1,2].annotate('Residual',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
+        fig.suptitle(f'Forecasts on slices across {slice_axis_colname} animated',x=0.2,y=1,size=20)
+        ani = animation.ArtistAnimation(fig, imgs, interval=500, repeat_delay = 1000, blit=True)
+        try:
+            writer = animation.FFMpegWriter(fps=30, bitrate=1800)
+            ani.save(img_dir+"/pred_animation.mp4", writer=writer) 
+            print('Fail to save animation as mp4, try installing ffmpeg package.')
+        except:
+            ani.save(img_dir+"/pred_animation.gif")
+
