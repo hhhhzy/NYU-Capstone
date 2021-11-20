@@ -7,7 +7,7 @@ from athena_read import *
 from sklearn.preprocessing import StandardScaler
 
 def get_rho(data_path):
-    lst = sorted(os.listdir(data_path))[4:]
+    lst = sorted(os.listdir(data_path))[4:-1]   #drop the last file since it duplicates
     rho = []
     coords = []
     timestamps = []
@@ -155,7 +155,7 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
-        , window_size = window_size, pred_size = pred_size, scale = False, option = input_type, patch_size=patch_size)
+        , window_size = window_size, pred_size = pred_size, scale = True, option = input_type, patch_size=patch_size)
     print(f'train_data: {train_data.shape}')
     
     if test_mode:
