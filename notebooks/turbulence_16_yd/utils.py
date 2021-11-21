@@ -232,7 +232,21 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         truth_colname: string, column name of truths in pred_df
         time_colname: string, column name of timestamps in pred_df
         plot_anime: bool, animated plots will be saved if True 
-        img_dir: str, path to folder where plots are saved         
+        img_dir: str, path to folder where plots are saved      
+    Sample use:
+        img_dir = 'figs' 
+        pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) or 'transformer_prediction_coords.csv'
+
+        grid_size = [16,16,16]
+        axis_colnames = ['x1','x2','x3']
+        slice_axis_index = 0
+        pred_colname = 'prediction'
+        truth_colname = 'truth'
+        time_colname = 'time'
+
+        plot_forecast(pred_df=pred_df, grid_size=grid_size, axis_colnames=axis_colnames, slice_axis_index=2, \
+                        pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
+                        plot_anime = True, img_dir = 'figs/')   
     '''
     if len(grid_size)!=3:
         grid_size = [grid_size]*3
@@ -335,8 +349,8 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         ani = animation.ArtistAnimation(fig, imgs, interval=500, repeat_delay = 1000, blit=True)
         try:
             writer = animation.FFMpegWriter(fps=30, bitrate=1800)
-            ani.save(img_dir+"/pred_animation.mp4", writer=writer) 
-            print('Fail to save animation as mp4, try installing ffmpeg package.')
+            ani.save(img_dir+f"/pred_animation_across_{slice_axis_colname}.mp4", writer=writer) 
         except:
-            ani.save(img_dir+"/pred_animation.gif")
+            print('Saving animation in .mp4 format, try installing ffmpeg package. \n Saving to .gif instead')
+            ani.save(img_dir+f"/pred_animation_across_{slice_axis_colname}.gif")
 
