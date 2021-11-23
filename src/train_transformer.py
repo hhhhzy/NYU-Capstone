@@ -173,9 +173,9 @@ if __name__ == "__main__":
     config_1: tunes for the combination of patch_size, batch_size, window_size, and lr, which should be tuned with priority
     config_2: tunes for pe_type and the model parameters, which should be tuned after we get the best setting in config_1
     """
-    num_samples = 10
+    num_samples = 100
     config_1 = {
-        'window_size':tune.randint(10,40), 
+        'window_size':tune.randint(5,40), 
         'patch_x1':tune.choice([1,2,4,16]),
         'patch_x2':tune.choice([1,2,4,16]),
         'patch_x3':tune.choice([1,2,4,16]),

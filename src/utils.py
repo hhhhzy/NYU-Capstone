@@ -162,13 +162,13 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         dataset_train, dataset_test, dataset_val = CustomDataset(train_data,train_coords,train_timestamps), CustomDataset(test_data,test_coords,test_timestamps), CustomDataset(val_data,val_coords,val_timestamps)
 
         train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, \
-                                            drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
+                                            drop_last=True, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
         test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size, \
-                                            drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
+                                            drop_last=True, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
         val_loader = torch.utils.data.DataLoader(dataset_val, batch_size=batch_size, \
-                                            drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
+                                            drop_last=True, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
 
         return train_loader,val_loader, test_loader
