@@ -72,7 +72,7 @@ def evaluate(model,data_loader,criterion, patch_size):
     return total_loss
 
 
-def predict_model(model, test_loader, epoch, patch_size, scale,\
+def predict_model(model, test_loader, epoch, patch_size, scale, scaler,\
                     plot=True, plot_range=[0,0.01], final_prediction=False):
     '''
     plot_range: [a,b], 0<=a<b<=1, where a is the proportion that determines the start point to plot, b determines the end point. 
@@ -119,8 +119,10 @@ def predict_model(model, test_loader, epoch, patch_size, scale,\
         a = a[np.argsort(a[:, 2], kind='stable')]
         a = a[np.argsort(a[:, 1], kind='stable')]
         a = a[np.argsort(a[:, 0], kind='stable')]
-        final_result = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'prediction': a[:,4], 'truth':a[:,5]}
-        
+        if scale==True:
+            final_result = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'prediction': scaler.inverse_transform(a[:,4]), 'truth':scaler.inverse_transform(a[:,5])}
+        elif scale==False:
+            final_result = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'prediction': a[:,4], 'truth':a[:,5]}
 
     
     if plot==True:
@@ -128,15 +130,9 @@ def predict_model(model, test_loader, epoch, patch_size, scale,\
         fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
         plot_start = int(len(final_result['prediction'])*plot_range[0])
         plot_end = int(len(final_result['prediction'])*plot_range[1])
-        if scale==True:
-            ax.plot(scaler.inverse_transform(final_result['truth'][plot_start:plot_end]),label = 'truth')
-            ax.plot(scaler.inverse_transform(final_result['prediction'][plot_start:plot_end]),label='forecast')
-            ax.plot(scaler.inverse_transform(final_result['prediction'][plot_start:plot_end]) - \
-                    scaler.inverse_transform(final_result['truth'][plot_start:plot_end]),ls='--',label='residual')
-        elif scale==False:
-            ax.plot(final_result['truth'][plot_start:plot_end],label = 'truth')
-            ax.plot(final_result['prediction'][plot_start:plot_end],label='forecast')
-            ax.plot(final_result['prediction'][plot_start:plot_end] - final_result['truth'][plot_start:plot_end],ls='--',label='residual')            
+        ax.plot(final_result['truth'][plot_start:plot_end],label = 'truth')
+        ax.plot(final_result['prediction'][plot_start:plot_end],label='forecast')
+        ax.plot(final_result['prediction'][plot_start:plot_end] - final_result['truth'][plot_start:plot_end],ls='--',label='residual')            
         #ax.grid(True, which='both')
         ax.axhline(y=0)
         ax.legend(loc="upper right")
@@ -157,7 +153,7 @@ if __name__ == "__main__":
     root_dir = '/scratch/zh2095/tune_results'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
-    best_config = {'window_size': 10, 'patch_size': (4,4,1), 'pe_type': '3d', 'batch_size': 1, 'feature_size': 120, 'num_enc_layers': 1, 'num_dec_layers': 1,\
+    best_config = {'window_size': 20, 'patch_size': (4,4,1), 'pe_type': '3d', 'batch_size': 1, 'feature_size': 120, 'num_enc_layers': 1, 'num_dec_layers': 1,\
                      'num_head': 2, 'd_ff': 512, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9, 'scale': False}
     # model hyperparameters
     window_size = best_config['window_size']
@@ -184,8 +180,8 @@ if __name__ == "__main__":
     skip_training = False
     save_model = True
 
-    print('-'*20 + ' Setting ' + '-'*20, flush=True)
-    print(f'pe type:{pe_type}, window size:{window_size}, patch size:{patch_size}', flush=True)
+    print('-'*20 + ' Config ' + '-'*20, flush=True)
+    print(best_config, flush=True)
     print('-'*50, flush=True)
 
     model = Tranformer(feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
@@ -259,7 +255,7 @@ if __name__ == "__main__":
 
             if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
-                predict_model(model, test_loader, epoch, patch_size=patch_size, scale=scale, \
+                predict_model(model, test_loader, epoch, patch_size=patch_size, scale=scale, scaler=scaler,\
                                     plot=True, plot_range=[0,0.01], final_prediction=False)   
 
             writer.add_scalar('train_loss',avg_train_loss,epoch)
@@ -295,7 +291,7 @@ if __name__ == "__main__":
 
 ### Predict
     start_time = time.time()
-    final_result = predict_model(model, test_loader,  epoch, patch_size=patch_size, scale=scale, \
+    final_result = predict_model(model, test_loader,  epoch, patch_size=patch_size, scale=scale, scaler=scaler,\
                                             plot=True, plot_range=[0,1], final_prediction=True)
     prediction = final_result['prediction']
     print('-'*20 + ' Measure for Simulation Speed ' + '-'*20)
