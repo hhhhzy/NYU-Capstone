@@ -37,6 +37,7 @@ pip install pytorch-lightning
 pip install -U ray[default]
 pip install -U ray[tune]
 pip install seaborn
+pip install ffmpeg
 
 cat << 'EOFBASHRC' >> ~/.bashrc
 if [[ -f ~/environment.sh ]]; then
