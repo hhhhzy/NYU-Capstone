@@ -51,30 +51,26 @@ def evaluate_old(model,data_loader,criterion):
     return total_loss
 
 
-def evaluate(model,data_loader,criterion, input_type='patch', patch_size=2):
+def evaluate(model,data_loader,criterion, patch_size=(1,1,16)):
     model.eval()    
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
     truth = torch.Tensor(0)
     total_loss = 0.
+    x1, x2, x3 = patch_size
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda:0"
         if torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
-    with torch.no_grad():
-        if input_type == 'patch':
-            patch_size = patch_size
-        else:
-            patch_size = 1
-            
+    with torch.no_grad():        
         for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(data_loader):
             src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                             src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-            dec_inp = torch.zeros([tgt.shape[0], patch_size**3, tgt.shape[-1]]).float().to(device)
-            dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-patch_size**3),:], dec_inp], dim=1).float().to(device)
+            dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
+            dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-x1*x2*x3),:], dec_inp], dim=1).float().to(device)
             output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
-            total_loss += criterion(output[:,-patch_size**3:,:], tgt[:,-patch_size**3:,:]).detach().cpu().numpy()
+            total_loss += criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:]).detach().cpu().numpy()
 
     return total_loss
 
@@ -84,20 +80,20 @@ def train(config, checkpoint_dir):
     test_proportion = 0.2
     val_proportion = 0.2
 
-    input_type = config['input_type']
+    window_size = config['window_size']
+    patch_size = config['patch_size']
     pe_type = config['pe_type']
     feature_size = config['feature_size']
-    num_enc_layers = config['num_enc_layers']
-    num_dec_layers = config['num_dec_layers']
-    num_head = config['num_head']
-    
-    patch_size = 2
+    batch_size = config['batch_size']
+
+    scale = False
+    num_enc_layers = 1
+    num_dec_layers = 1
+    num_head = 2
     dropout = 0.1 #config['dropout']
     d_ff = 2048
-    lr = config['lr']
-    lr_decay = config['lr_decay']
-    window_size = 10 #config['window_size']
-    batch_size = 256 #config['batch_size']
+    lr = 1e-5
+    lr_decay = 0.1
     
     #model = Tranformer(feature_size=feature_size,num_layers=num_layer,dropout=dropout,num_head=num_head)
     model = Tranformer(feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
@@ -124,33 +120,29 @@ def train(config, checkpoint_dir):
     #     optimizer.load_state_dict(optimizer_state)
         
     train_loader,val_loader, test_loader = get_data_loaders(train_proportion, test_proportion, val_proportion,\
-        window_size = window_size, pred_size = 1, batch_size = batch_size, num_workers = 2, pin_memory = False,\
-        use_coords = True, use_time = True, test_mode = False, input_type = input_type, patch_size=patch_size)
+        pred_size = 1, batch_size = batch_size, num_workers = 2, pin_memory = False, use_coords = True, use_time = True,\
+        test_mode = False, scale = scale, window_size = window_size, patch_size = patch_size)
 
+    x1, x2, x3 = patch_size
     for epoch in range(1, epochs + 1):
         model.train() 
         total_loss = 0.
-
-        if input_type == 'patch':
-            patch_size = patch_size
-        else:
-            patch_size = 1
 
         for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
             src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                                 src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
             optimizer.zero_grad()
-            dec_inp = torch.zeros([tgt.shape[0], patch_size**3, tgt.shape[-1]]).float().to(device)
-            dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-patch_size**3),:], dec_inp], dim=1).float().to(device)
+            dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
+            dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-x1*x2*x3),:], dec_inp], dim=1).float().to(device)
             output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
-            loss = criterion(output[:,-patch_size**3:,:], tgt[:,-patch_size**3:,:])
+            loss = criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:])
             total_loss += loss.item()
             loss.backward()
             optimizer.step()
 
-        avg_train_loss = total_loss*batch_size*patch_size**3/len(train_loader.dataset)
-        total_val_loss = evaluate(model, val_loader, criterion, input_type=input_type, patch_size=patch_size)
-        avg_val_loss = total_val_loss*batch_size*patch_size**3/len(val_loader.dataset)
+        avg_train_loss = total_loss*batch_size/len(train_loader.dataset)
+        total_val_loss = evaluate(model, val_loader, criterion, patch_size=patch_size)
+        avg_val_loss = total_val_loss*batch_size/len(val_loader.dataset)
 
 
 
@@ -173,14 +165,14 @@ def train(config, checkpoint_dir):
 
 if __name__ == "__main__":
     config = {
-        'input_type':tune.grid_search(['space', 'time', 'patch']),
+        'window_size':tune.grid_search([10,20]), 
+        'patch_size':tune.grid_search([(1,1,16), (1,16,1), (16,1,1)]),
         'pe_type':tune.grid_search(['1d','3d','3d_temporal']),
-        'lr':tune.grid_search([1e-4, 1e-5]),
-        'lr_decay':tune.grid_search([0.1, 0.9]),
-        'feature_size':tune.grid_search([768]),
-        'num_enc_layers':tune.grid_search([1]),
-        'num_dec_layers':tune.grid_search([1]),
-        'num_head':tune.grid_search([2]),
+        'batch_size':tune.grid_search([16,64,256]),
+        'feature_size':tune.grid_search([120,640]),
+        #'num_enc_layers':tune.grid_search([1]),
+        #'num_dec_layers':tune.grid_search([1]),
+        #'num_head':tune.grid_search([2]),
         #'dropout':tune.grid_search([0.1,0.2]),
         #'d_ff':tune.grid_search([512])
         #'lr':tune.grid_search([0.0001]),
