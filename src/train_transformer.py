@@ -169,9 +169,8 @@ def train(config, checkpoint_dir):
 if __name__ == "__main__":
     """
     Notes:
-    num_samples: For each sample, each of the grid search parameters will be sampled once, while the random searched parameters will be sampled randomly
+    num_samples: number of trails we plan to do
     config_1: tunes for the combination of patch_size, batch_size, window_size, and lr, which should be tuned with priority
-    search_alg: 
     config_2: tunes for pe_type and the model parameters, which should be tuned after we get the best setting in config_1
     """
     num_samples = 10
