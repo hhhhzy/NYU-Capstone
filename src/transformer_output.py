@@ -4,7 +4,7 @@ from torch.utils import tensorboard
 import torch.optim as optim
 import pandas as pd
 import numpy as np
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, explained_variance_score, r2_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import time
@@ -153,8 +153,8 @@ if __name__ == "__main__":
     root_dir = '/scratch/zh2095/tune_results'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
-    best_config = {'window_size': 20, 'patch_size': (4,4,1), 'pe_type': '3d', 'batch_size': 1, 'feature_size': 120, 'num_enc_layers': 1, 'num_dec_layers': 1,\
-                     'num_head': 2, 'd_ff': 512, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9, 'scale': False}
+    best_config = {'window_size': 10, 'patch_size': (4,4,1), 'pe_type': '3d_temporal', 'batch_size': 1, 'feature_size': 120, 'num_enc_layers': 1, 'num_dec_layers': 1,\
+                     'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9, 'scale': False}
     # model hyperparameters
     window_size = best_config['window_size']
     patch_size = best_config['patch_size']
@@ -301,8 +301,10 @@ if __name__ == "__main__":
     truth = final_result['truth']
     MSE = mean_squared_error(truth, prediction)
     MAE = mean_absolute_error(truth, prediction)
+    R2 = r2_score(truth, prediction)
+    EXPLAINED_VARIANCE_SCORE = explained_variance_score(truth, prediction)
     print('-'*20 + ' Measure for Simulation Performance ' + '-'*20)
-    print(f'MSE: {MSE}, MAE: {MAE}')
+    print(f'MSE: {MSE}, MAE: {MAE}, R2: {R2}, EXPLAINED_VARIANCE_SCORE: {EXPLAINED_VARIANCE_SCORE}')
 
 ### Save model result
     test_result_df = pd.DataFrame.from_dict(final_result)
