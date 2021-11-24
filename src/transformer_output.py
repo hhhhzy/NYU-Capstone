@@ -157,7 +157,7 @@ def predict_model(model, test_loader, epoch, config={},\
 
 if __name__ == "__main__":
     print(f'Pytorch version {torch.__version__}')
-    root_dir = '/scratch/zh2095/nyu-capstone/src_test/tune_results'
+    root_dir = '/scratch/zh2095/tune_results'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     best_config = {'epochs':2, 'window_size': 10, 'patch_size': (4,4,1), 'pe_type': '3d', 'batch_size': 16, 'scale': False,\

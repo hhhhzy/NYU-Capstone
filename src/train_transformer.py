@@ -154,8 +154,6 @@ def train(config, checkpoint_dir):
 
         writer.add_scalar('train_loss',train_loss,epoch)
         writer.add_scalar('val_loss',val_loss,epoch)
-        writer.add_scaler('r2', r2, epoch)
-        writer.add_scaler('explained_variance_score', explained_variance, epoch)
 
         Early_Stopping(model, val_loss)
 
