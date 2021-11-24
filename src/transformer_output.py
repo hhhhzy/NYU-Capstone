@@ -72,19 +72,24 @@ def evaluate(model,data_loader,criterion, patch_size):
     return total_loss
 
 
-def predict_model(model, test_loader, epoch, patch_size, scale, scaler,\
+def predict_model(model, test_loader, epoch, config={},\
                     plot=True, plot_range=[0,0.01], final_prediction=False):
     '''
-    plot_range: [a,b], 0<=a<b<=1, where a is the proportion that determines the start point to plot, b determines the end point. 
-    final_prediction: True, if done with training and using the trained/saved model to predict the final result
+    Note: 
+        Don't forget to create a subfolder 'final_plot' under 'figs'
+    parameters:
+        plot_range: [a,b], 0<=a<b<=1, where a is the proportion that determines the start point to plot, b determines the end point. 
+        final_prediction: True, if done with training and using the trained/saved model to predict the final result
+        config: dictionary, the config of this plot, used for saving distinguishable plots for each trail
     '''
     model.eval()
+
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0) 
     truth = torch.Tensor(0) 
     test_ts = torch.Tensor(0)
     test_coord = torch.Tensor(0)
-    x1, x2, x3 = patch_size
+
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda:0"
@@ -137,9 +142,11 @@ def predict_model(model, test_loader, epoch, patch_size, scale, scaler,\
         ax.axhline(y=0)
         ax.legend(loc="upper right")
         if final_prediction == True:
-            fig.savefig(root_dir + '/figs/transformer_pred.png')
+            fig.savefig(root_dir + '/figs/final_plot' + f"/range{plot_range}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.png")
         else:
-            fig.savefig(root_dir + f'/figs/epoch{epoch}_{pe_type}_{window_size}_{x1}-{x2}-{x3}.png')
+            fig.savefig(root_dir + '/figs/tmp_plot' + f"/epoch{epoch}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.png")
+            if epoch == config['epochs']:
+                fig.savefig(root_dir + '/figs/final_plot'+ f"/range{plot_range}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.png")
         plt.close(fig)
 
     if final_prediction == True:
@@ -150,11 +157,11 @@ def predict_model(model, test_loader, epoch, patch_size, scale, scaler,\
 
 if __name__ == "__main__":
     print(f'Pytorch version {torch.__version__}')
-    root_dir = '/scratch/zh2095/tune_results'
+    root_dir = '/scratch/zh2095/nyu-capstone/src_test/tune_results'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
-    best_config = {'window_size': 10, 'patch_size': (4,4,1), 'pe_type': '3d_temporal', 'batch_size': 1, 'feature_size': 120, 'num_enc_layers': 1, 'num_dec_layers': 1,\
-                     'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9, 'scale': False}
+    best_config = {'epochs':2, 'window_size': 10, 'patch_size': (4,4,1), 'pe_type': '3d', 'batch_size': 16, 'scale': False,\
+                    'feature_size': 120, 'num_enc_layers': 1, 'num_dec_layers': 1, 'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9}
     # model hyperparameters
     window_size = best_config['window_size']
     patch_size = best_config['patch_size']
@@ -213,7 +220,7 @@ if __name__ == "__main__":
         pred_size = 1, batch_size = batch_size, num_workers = 2, pin_memory = False, use_coords = True, use_time = True,\
         test_mode = True, scale = scale, window_size = window_size, patch_size = patch_size)
 
-    epochs = 2
+    epochs = best_config['epochs']
     train_losses = []
     test_losses = []
     tolerance = 10
@@ -255,7 +262,7 @@ if __name__ == "__main__":
 
             if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
-                predict_model(model, test_loader, epoch, patch_size=patch_size, scale=scale, scaler=scaler,\
+                predict_model(model, test_loader, epoch, config=best_config,\
                                     plot=True, plot_range=[0,0.01], final_prediction=False)   
 
             writer.add_scalar('train_loss',avg_train_loss,epoch)
@@ -282,16 +289,16 @@ if __name__ == "__main__":
     xs = np.arange(len(train_losses))
     fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
     ax.plot(xs,train_losses)
-    fig.savefig(root_dir + f'/figs/train_loss_{pe_type}_{window_size}_{x1}-{x2}-{x3}.png')
+    fig.savefig(root_dir + '/figs/loss' + f"/train_loss_pe{best_config['pe_type']}_batch{best_config['batch_size']}_window{best_config['window_size']}_patch{best_config['patch_size']}.png")
     plt.close(fig)
     fig, ax = plt.subplots(nrows =1, ncols=1, figsize=(20,10))
     ax.plot(xs,test_losses)
-    fig.savefig(root_dir + f'/figs/test_loss_{pe_type}_{window_size}_{x1}-{x2}-{x3}.png')
+    fig.savefig(root_dir + '/figs/loss' + f"/test_loss_pe{best_config['pe_type']}_batch{best_config['batch_size']}_window{best_config['window_size']}_patch{best_config['patch_size']}.png")
     plt.close(fig)
 
 ### Predict
     start_time = time.time()
-    final_result = predict_model(model, test_loader,  epoch, patch_size=patch_size, scale=scale, scaler=scaler,\
+    final_result = predict_model(model, test_loader,  epoch, config=best_config,\
                                             plot=True, plot_range=[0,1], final_prediction=True)
     prediction = final_result['prediction']
     print('-'*20 + ' Measure for Simulation Speed ' + '-'*20)
@@ -323,7 +330,7 @@ if __name__ == "__main__":
     time_colname = 'time'
     plot_forecast(pred_df=pred_df, grid_size=grid_size, axis_colnames=axis_colnames, slice_axis_index=2, \
                         pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
-                        plot_anime = True, img_dir = img_dir)  
+                        plot_anime = True, img_dir = img_dir, config=best_config) 
 
 
 

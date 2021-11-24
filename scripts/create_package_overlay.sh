@@ -37,7 +37,8 @@ pip install pytorch-lightning
 pip install -U ray[default]
 pip install -U ray[tune]
 pip install seaborn
-pip install ffmpeg
+conda install -c conda-forge ffmpeg
+conda install -c conda-forge openh264
 
 cat << 'EOFBASHRC' >> ~/.bashrc
 if [[ -f ~/environment.sh ]]; then

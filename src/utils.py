@@ -176,8 +176,10 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
 
 def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], slice_axis_index=0, \
                   pred_colname='prediction',truth_colname='truth', time_colname='time',  \
-                  plot_anime = True, img_dir = 'figs'):
+                  plot_anime = True, img_dir = 'figs', config={}):
     '''
+    Notes: 
+        please create two subfolders 'gif' and 'mp4' to save the animated slice plot for each trail 
     Parameters:
         pred_df: string of dir of csv file or pandas.Dataframe, predictions with coordinates and time
         grid_size: int or list-like, dimensions of one meshblock
@@ -187,7 +189,8 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         truth_colname: string, column name of truths in pred_df
         time_colname: string, column name of timestamps in pred_df
         plot_anime: bool, animated plots will be saved if True 
-        img_dir: str, path to folder where plots are saved      
+        img_dir: str, path to folder where plots are saved 
+        config: dictionary, the config of this plot, used for saving distinguishable animated plots for each trail
     Sample use:
         img_dir = 'figs' 
         pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) or 'transformer_prediction_coords.csv'
@@ -199,7 +202,7 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         time_colname = 'time'
         plot_forecast(pred_df=pred_df, grid_size=grid_size, axis_colnames=axis_colnames, slice_axis_index=2, \
                         pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
-                        plot_anime = True, img_dir = 'figs/')   
+                        plot_anime = True, img_dir = 'figs/', config=best_config)   
     '''
     if len(grid_size)!=3:
         grid_size = [grid_size]*3
@@ -268,7 +271,7 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         axes[-1,2].annotate('Residual',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
         #axes[-1,0].annotate('Slice number', (0, 0.5), xytext=(-50, 0), textcoords='offset points', xycoords='axes fraction', ha='left', va='center', size=15, rotation=90)
         fig.suptitle(f'Forecasts on slices across {slice_axis_colname} at timestamp {ts}',x=0.2,y=1,size=20)
-        plt.savefig(img_dir+f'/ts_{ts}_result.png', bbox_inches="tight")
+        plt.savefig(img_dir + '/tmp_plot' + f'/ts_{ts}_result.png', bbox_inches="tight")
         plt.close()
         
     if plot_anime:
@@ -301,7 +304,7 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         ani = animation.ArtistAnimation(fig, imgs, interval=500, repeat_delay = 1000, blit=True)
         try:
             writer = animation.FFMpegWriter(fps=30, bitrate=1800)
-            ani.save(img_dir+f"/pred_animation_across_{slice_axis_colname}.mp4", writer=writer) 
+            ani.save(img_dir+"/mp4"+f"/{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.mp4", writer=writer) 
         except:
             print('Saving animation in .mp4 format, try installing ffmpeg package. \n Saving to .gif instead')
-            ani.save(img_dir+f"/pred_animation_across_{slice_axis_colname}.gif")
+            ani.save(img_dir+"/gif"+f"/{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.gif")

@@ -148,12 +148,14 @@ def train(config, checkpoint_dir):
         val_loss, r2, explained_variance = evaluate(model, val_loader, criterion, patch_size=patch_size)
 
 
-        print(f'Epoch: {epoch}, train_loss: {train_loss}, val_loss: {val_loss}', flush=True)
+        #print(f'Epoch: {epoch}, train_loss: {train_loss}, val_loss: {val_loss}', flush=True)
             
-        tune.report(train_loss = train_loss, val_loss = val_loss, r2 = r2, explained_variance = explained_variance)
+        tune.report(train_loss = train_loss, val_loss = val_loss, r2 = r2, explained_variance = explained_variance, epoch=epoch)
 
         writer.add_scalar('train_loss',train_loss,epoch)
         writer.add_scalar('val_loss',val_loss,epoch)
+        writer.add_scaler('r2', r2, epoch)
+        writer.add_scaler('explained_variance_score', explained_variance, epoch)
 
         Early_Stopping(model, val_loss)
 
