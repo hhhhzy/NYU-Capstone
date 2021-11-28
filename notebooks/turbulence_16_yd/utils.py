@@ -3,10 +3,13 @@ import os
 import numpy as np
 import torch 
 import torch.nn as nn
+import matplotlib.pyplot as plt
+from matplotlib import patches
 from _arfima import arfima
 from utils import *
 from athena_read import *
 from sklearn.preprocessing import StandardScaler
+
 def get_rho(data_path):
     lst = sorted(os.listdir(data_path))[4:]
     rho = []
@@ -33,9 +36,10 @@ def get_rho(data_path):
     return rho_reshaped, meshed_blocks, coords, timestamps
 
 
-def to_windowed(data, meshed_blocks, window_size, pred_size, option='patch', patch_size=2):
+def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16), option='patch'):
     """
-    note: window_size represents number of timestamps when option='time' or 'patch', while represents number of blocks when option='space' 
+    window_size: Here represents the number of time steps in each window
+    patch_size: (x1,x2,x3), determines the shape of the cuboid patch
     """
     out = []
     if option == 'space':
@@ -54,26 +58,28 @@ def to_windowed(data, meshed_blocks, window_size, pred_size, option='patch', pat
             out.append((feature,target))
 
     elif option == 'patch':
+        x1, x2, x3 = patch_size
         nx1, nx2, nx3 = meshed_blocks
         length = int((len(data)-nx1*nx2*nx3*window_size)/(patch_size**3))
 
         vertices = []
         for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
-            for i in range(nx1//patch_size):
-                for j in range(nx2//patch_size):
-                    for k in range(nx3//patch_size):
-                        vertices.append(t*nx1*nx2*nx3+patch_size*k+patch_size*nx1*j+patch_size*nx1*nx2*i)
+            for i in range(nx1//x1):
+                for j in range(nx2//x2):
+                    for k in range(nx3//x3):
+                        vertices.append(t*nx1*nx2*nx3 + i*x1*nx2*nx3 + j*x2*nx3 + k*x3)
 
         for i in vertices:
             feature  = np.array(data[[i + time*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
-                                for time in range(window_size) for j in range(patch_size) for k in range(patch_size) for l in range(patch_size)]])
+                                for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])
             target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
-                                for time in range(window_size) for j in range(patch_size) for k in range(patch_size) for l in range(patch_size)]])      
+                                for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])      
             out.append((feature,target))
             
     return np.array(out)
+
 def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
-              , window_size = 12, pred_size = 1, scale = False, option='patch', patch_size=2):
+              , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch'):
 
     if scale == True:
         scaler = StandardScaler()
@@ -85,7 +91,7 @@ def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_propor
         num_simulation = int(len(data)/simulation_size)
         ### ADD TO START TEST AND VALI SETS WITH A NEW SIMULATION
         
-    x_vals = to_windowed(data, meshed_blocks, window_size, pred_size, option=option, patch_size=patch_size)
+    x_vals = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size)
 
     total_len = len(x_vals)
     train_len = int(total_len*train_proportion)
@@ -117,20 +123,11 @@ class CustomDataset(torch.utils.data.Dataset):
     def __getitem__(self,idx):
         return((self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1)),(self.coords[idx][0], self.coords[idx][1]),(self.timestamp[idx][0], self.timestamp[idx][1]))
     
-# class CustomDataset(torch.utils.data.Dataset):
-#     def __init__(self,x,coords):
-#         self.x=x
-#         self.coords=coords
- 
-#     def __len__(self):
-#         return len(self.x)
- 
-#     def __getitem__(self,idx):
-#         return((self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1)),(self.coords[idx][0], self.coords[idx][1]))
 
-def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25,window_size = 10, \
+def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
-                        use_coords = True, use_time = True, test_mode = False, input_type='patch', patch_size=2): 
+                        use_coords = True, use_time = True, test_mode = False, scale = False, \
+                        window_size = 10, input_type='patch', patch_size=2): 
     np.random.seed(505)
     
     data_path='/scratch/yd1008/nyu-capstone/data_turb_dedt1_16'
@@ -142,29 +139,26 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
     #data = arfima([0.5,0.4],0.3,[0.2,0.1],10000,warmup=2^10)
     if use_coords:
         print('-'*20,'split for coords')
-        train_coords,val_coords,test_coords = train_test_val_split(\
+        train_coords,val_coords,test_coords, scaler = train_test_val_split(\
             coords, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , window_size = window_size, pred_size = pred_size, scale = False\
-            , option = input_type, patch_size=patch_size)
+            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option= input_type)
         print(f'train_coords: {train_coords.shape}')
 
 
     if use_time:
         print('-'*20,'split for timestamp')
-        train_timestamps,val_timestamps,test_timestamps = train_test_val_split(\
+        train_timestamps,val_timestamps,test_timestamps, scaler = train_test_val_split(\
             timestamps, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , window_size = window_size, pred_size = pred_size, scale = False\
-            , option = input_type, patch_size=patch_size)
+            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option= input_type)
         print(f'train_timestamps: {train_timestamps.shape}')
 
     print('-'*20,'split for data')
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
-        , window_size = window_size, pred_size = pred_size, scale = True\
-        , option = input_type, patch_size=patch_size)
+        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option= input_type)
     print(f'train_data: {train_data.shape}')
 
     if test_mode:
@@ -192,31 +186,19 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         val_loader = torch.utils.data.DataLoader(dataset_val, batch_size=batch_size, \
                                             drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
-        # if use_coords:
-        #     coords_train, coords_test, coords_val = CustomFeatureDataset(train_data), CustomFeatureDataset(test_data), CustomFeatureDataset(val_data)
-        #     train_coords_loader = torch.utils.data.DataLoader(coords_train, batch_size=batch_size, 
-        #                                         drop_last=False, 
-        #                                         num_workers=num_workers, pin_memory=pin_memory)
-        #     test_coords_loader = torch.utils.data.DataLoader(coords_test, batch_size=batch_size, 
-        #                                         drop_last=False, 
-        #                                         num_workers=num_workers, pin_memory=pin_memory)
-        #     val_coords_loader = torch.utils.data.DataLoader(coords_val, batch_size=batch_size, 
-        #                                         drop_last=False, 
-        #                                         num_workers=num_workers, pin_memory=pin_memory)
-        #     return train_loader,val_loader, test_loader, train_coords_loader, test_coords_loader, val_coords_loader
-
+       
         return train_loader,val_loader, test_loader
 
-img_dir = 'figs' ###dir to save images to
-pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) ###dir of csv file, or pandas dataframe
+# img_dir = 'figs' ###dir to save images to
+# pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) ###dir of csv file, or pandas dataframe
 
 
-grid_size = [16,16,16]
-axis_colnames = ['x1','x2','x3']
-slice_axis_index = 0
-pred_colname = 'prediction'
-truth_colname = 'truth'
-time_colname = 'time'
+# grid_size = [16,16,16]
+# axis_colnames = ['x1','x2','x3']
+# slice_axis_index = 0
+# pred_colname = 'prediction'
+# truth_colname = 'truth'
+# time_colname = 'time'
 
 
 def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], slice_axis_index=0, \
@@ -248,7 +230,7 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
                         pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
                         plot_anime = True, img_dir = 'figs/')   
     '''
-    if len(grid_size)!=3:
+    if type(grid_size)==int:
         grid_size = [grid_size]*3
     if type(pred_df)== str:
         preds_all = pd.read_csv(pred_df,index_col=None)
@@ -354,3 +336,72 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
             print('Saving animation in .mp4 format, try installing ffmpeg package. \n Saving to .gif instead')
             ani.save(img_dir+f"/pred_animation_across_{slice_axis_colname}.gif")
 
+def plot_demo(num_timestamps, grid_size, patch_size, img_dir):
+    '''
+    Parameters:
+        num_timestamps: int, number of simulations to draw
+        grid_size: int or list-like, dimensions of one meshblock
+        patch_size: list-like, dimensions of patches
+        img_dir: str, path to folder where plots are saved
+    '''
+    if type(grid_size)==int:
+        grid_size = [grid_size]*3
+    def explode(data):
+        size = np.array(data.shape)*2
+        data_e = np.zeros(size - 1, dtype=data.dtype)
+        data_e[::2, ::2, ::2] = data
+        return data_e
+
+    def create_indices(grid_size,patch_size):
+        n_voxels = np.zeros((grid_size[0], grid_size[1], grid_size[2]), dtype=bool)
+        n_voxels[-patch_size[0]:, :patch_size[1], -patch_size[2]:] = True
+        # n_voxels[-1, 0, :] = True
+        # n_voxels[1, 0, 2] = True
+        # n_voxels[2, 0, 1] = True
+        facecolors = np.where(n_voxels, '#FFD65DC0', '#7A88CCC0')
+        edgecolors = np.where(n_voxels, '#BFAB6E', '#7D84A6')
+        filled = np.ones(n_voxels.shape)
+
+        filled_2 = explode(filled)
+        fcolors_2 = explode(facecolors)
+        ecolors_2 = explode(edgecolors)
+
+        x, y, z = np.indices(np.array(filled_2.shape) + 1).astype(float) // 2
+        x[0::2, :, :] += 0.05
+        y[:, 0::2, :] += 0.05
+        z[:, :, 0::2] += 0.05
+        x[1::2, :, :] += 0.95
+        y[:, 1::2, :] += 0.95
+        z[:, :, 1::2] += 0.95
+        return x,y,z,filled_2,fcolors_2,ecolors_2
+
+    blocks_per_patch = np.prod(patch_size)
+    x_fullgrid, y_fullgrid, z_fullgrid,filled_fullgrid,fcolors_fullgrid,ecolors_fullgrid = create_indices(grid_size,patch_size)
+    x_flattened, y_flattened, z_flattened,filled_flattened,fcolors_flattened,ecolors_flattened = create_indices((blocks_per_patch,1,1),(blocks_per_patch,1,1))
+    fig = plt.figure(figsize=(3*num_timestamps,6))
+    transFigure = fig.transFigure.inverted()
+    for ts in range(num_timestamps):
+        ax1 = fig.add_subplot(2, num_timestamps, ts+1, projection='3d')
+        ax1.voxels(x_fullgrid, y_fullgrid, z_fullgrid, filled_fullgrid, facecolors=fcolors_fullgrid, edgecolors=ecolors_fullgrid)
+        ax1.set_axis_off()
+        ax1.set_title(f'Simulation @ t={ts+1}')
+        
+        ax2 = fig.add_subplot(2, num_timestamps, num_timestamps+ts+1, projection='3d')
+        ax2.voxels(x_flattened, y_flattened, z_flattened, filled_flattened, facecolors=fcolors_flattened, edgecolors=ecolors_flattened)
+        ax2.set_axis_off()
+        ax2.set_ylim(1-blocks_per_patch,1)
+        ax2.set_zlim(1-blocks_per_patch,1)
+        ax2.annotate('Flatten', xy=(0, 0), xytext=(-0.05, 0.12),fontsize=11)
+        if ts!=num_timestamps-1:
+            ax2.annotate('+', xy=(0, 0), xytext=(0.11, 0.06),fontsize=15)
+        
+        xyA = [0.01,-0.02]
+        xyB = [0.02,0.065]
+        coord1 = transFigure.transform(ax1.transData.transform(xyA))
+        coord2 = transFigure.transform(ax2.transData.transform(xyB))
+        arrow = patches.FancyArrowPatch(coord1,coord2,shrinkA=0,shrinkB=0,transform=fig.transFigure,color='Black',\
+                                        arrowstyle="-|>",mutation_scale=30,linewidth=1.5,)
+        fig.patches.append(arrow)
+
+    #plt.show()
+    plt.savefig(img_dir+'patch_demo.png', bbox_inches="tight", facecolor='white')
