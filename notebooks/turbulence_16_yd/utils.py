@@ -4,6 +4,7 @@ import numpy as np
 import torch 
 import torch.nn as nn
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 from matplotlib import patches
 from _arfima import arfima
 from utils import *
@@ -24,7 +25,7 @@ def get_rho(data_path):
         coord = np.transpose(np.array(np.meshgrid(np.arange(nx1),np.arange(nx2),np.arange(nx3))), axes=[2,1,3,0]).reshape(-1,3)
         rho.append(d['rho'])
         timestamp_repeated = [d['Time']]*(np.prod(d['rho'].shape))
-        timestamps.extend(timestamp_repeated) ### Add nx1*nx2*nx3 time values into the output list
+        timestamps.extend(timestamp_repeated) 
         coords.extend(coord)
 
     rho = np.array(rho)
@@ -48,7 +49,8 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
             feature = np.array(data[i:i+(window_size)])
             target = np.array(data[i+pred_size:i+window_size+pred_size])
             out.append((feature, target))
-    
+        patches_per_block = None 
+
     elif option == 'time':
         nx1, nx2, nx3 = meshed_blocks
         length = len(data)-nx1*nx2*nx3*window_size
@@ -56,11 +58,11 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
             feature  = np.array(data[[i+nx1*nx2*nx3*k for k in range(window_size)]])
             target = np.array(data[[i+nx1*nx2*nx3*(k+pred_size) for k in range(window_size)]])        
             out.append((feature,target))
+        patches_per_block = None 
 
     elif option == 'patch':
         x1, x2, x3 = patch_size
         nx1, nx2, nx3 = meshed_blocks
-        length = int((len(data)-nx1*nx2*nx3*window_size)/(patch_size**3))
 
         vertices = []
         for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
@@ -70,37 +72,71 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
                         vertices.append(t*nx1*nx2*nx3 + i*x1*nx2*nx3 + j*x2*nx3 + k*x3)
 
         for i in vertices:
-            feature  = np.array(data[[i + time*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
+            feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
                                 for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])
             target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
                                 for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])      
             out.append((feature,target))
+        patches_per_block = np.prod([nx1//x1,nx2//x2,nx3//x3])
+        
+    elif option == 'patch_overlap':
+        x1, x2, x3 = patch_size
+        nx1, nx2, nx3 = meshed_blocks
+
+        vertices = []
+        for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
+            for k in range(nx3-x3+1):
+                for j in range(nx2-x2+1):
+                    for i in range(nx1-x1+1):
+                        vertices.append(t*nx1*nx2*nx3 + k*nx1*nx2 + j*nx1 + i)
+        for i in vertices:
+            feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
+                                for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])
+            target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
+                                for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])      
+            out.append((feature,target))
+        patches_per_block = np.prod([nx1-x1+1,nx2-x2+1,nx3-x3+1])
             
-    return np.array(out)
+    return np.array(out), patches_per_block
 
 def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
               , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch'):
-
     if scale == True:
         scaler = StandardScaler()
         data = scaler.fit_transform(data.reshape(-1, 1)).reshape(-1)
+    if option in ['patch','patch_overlap']: ### Force each set start on a new block
+        windows, patches_per_block = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
+        total_num_blocks = int(len(data)/np.prod(meshed_blocks)) #-(window_size-1)-(pred_size)
+        window_adjust_length = (window_size-1)+pred_size ###Move the sliding window to cover the data lost on the edges
 
-    if option == 'patch':
-        nx1, nx2, nx3 = meshed_blocks
-        simulation_size = nx1*nx2*nx3
-        num_simulation = int(len(data)/simulation_size)
-        ### ADD TO START TEST AND VALI SETS WITH A NEW SIMULATION
+        train_num_blocks = int(total_num_blocks*train_proportion)-window_adjust_length
+        val_num_blocks = int(total_num_blocks*val_proportion)
+
+        val_start_block = train_num_blocks
+
+        train_data_size = train_num_blocks*patches_per_block
+        val_data_size = val_num_blocks*patches_per_block
+
+        val_start_index = val_start_block*patches_per_block
+
+        train = windows[:train_data_size]
+        val = windows[val_start_index:val_start_index+val_data_size]
+        if option == 'patch_overlap': ###Retain the non-overlap test set in patch mode
+            test = train_test_val_split(data, meshed_blocks, train_proportion, val_proportion, test_proportion, pred_size, scale, window_size, patch_size, option='patch')[2]
+            test = test.numpy() ###Might not be efficient...
+        else: 
+            test = windows[val_start_index+val_data_size:]
+    else:
+        windows = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
+
+        total_len = len(windows)
+        train_len = int(total_len*train_proportion)
+        val_len = int(total_len*val_proportion)
         
-    x_vals = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size)
-
-    total_len = len(x_vals)
-    train_len = int(total_len*train_proportion)
-    val_len = int(total_len*val_proportion)
-    
-    train = x_vals[0:train_len]
-    val = x_vals[train_len:(train_len+val_len)]
-    test = x_vals[(train_len+val_len):]
-
+        train = windows[0:train_len]
+        val = windows[train_len:(train_len+val_len)]
+        test = windows[(train_len+val_len):]
+    print(train.shape,val.shape,test.shape)
     train_data = torch.from_numpy(train).float()
     val_data = torch.from_numpy(val).float()
     test_data = torch.from_numpy(test).float()
@@ -121,13 +157,13 @@ class CustomDataset(torch.utils.data.Dataset):
         return len(self.x)
  
     def __getitem__(self,idx):
-        return((self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1)),(self.coords[idx][0], self.coords[idx][1]),(self.timestamp[idx][0], self.timestamp[idx][1]))
+        return((self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1)),(self.coords[idx][0], self.coords[idx][1]),(self.timestamp[idx][0].view(-1,1), self.timestamp[idx][1].view(-1,1)))
     
 
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
                         use_coords = True, use_time = True, test_mode = False, scale = False, \
-                        window_size = 10, input_type='patch', patch_size=2): 
+                        window_size = 10, patch_size=(1,1,16), option='patch'): 
     np.random.seed(505)
     
     data_path='/scratch/yd1008/nyu-capstone/data_turb_dedt1_16'
@@ -139,26 +175,26 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
     #data = arfima([0.5,0.4],0.3,[0.2,0.1],10000,warmup=2^10)
     if use_coords:
         print('-'*20,'split for coords')
-        train_coords,val_coords,test_coords, scaler = train_test_val_split(\
+        train_coords,val_coords,test_coords = train_test_val_split(\
             coords, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option= input_type)
+            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
         print(f'train_coords: {train_coords.shape}')
 
 
     if use_time:
         print('-'*20,'split for timestamp')
-        train_timestamps,val_timestamps,test_timestamps, scaler = train_test_val_split(\
+        train_timestamps,val_timestamps,test_timestamps = train_test_val_split(\
             timestamps, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option= input_type)
+            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
         print(f'train_timestamps: {train_timestamps.shape}')
 
     print('-'*20,'split for data')
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
-        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option= input_type)
+        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
     print(f'train_data: {train_data.shape}')
 
     if test_mode:
@@ -203,8 +239,10 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
 
 def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], slice_axis_index=0, \
                   pred_colname='prediction',truth_colname='truth', time_colname='time',  \
-                  plot_anime = True, img_dir = 'figs'):
+                  plot_anime = True, img_dir = 'figs', config={}):
     '''
+    Notes: 
+        please create two subfolders 'gif' and 'mp4' to save the animated slice plot for each trail 
     Parameters:
         pred_df: string of dir of csv file or pandas.Dataframe, predictions with coordinates and time
         grid_size: int or list-like, dimensions of one meshblock
@@ -214,21 +252,20 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         truth_colname: string, column name of truths in pred_df
         time_colname: string, column name of timestamps in pred_df
         plot_anime: bool, animated plots will be saved if True 
-        img_dir: str, path to folder where plots are saved      
+        img_dir: str, path to folder where plots are saved 
+        config: dictionary, the config of this plot, used for saving distinguishable animated plots for each trail
     Sample use:
         img_dir = 'figs' 
         pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) or 'transformer_prediction_coords.csv'
-
         grid_size = [16,16,16]
         axis_colnames = ['x1','x2','x3']
         slice_axis_index = 0
         pred_colname = 'prediction'
         truth_colname = 'truth'
         time_colname = 'time'
-
         plot_forecast(pred_df=pred_df, grid_size=grid_size, axis_colnames=axis_colnames, slice_axis_index=2, \
                         pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
-                        plot_anime = True, img_dir = 'figs/')   
+                        plot_anime = True, img_dir = 'figs/', config=best_config)   
     '''
     if type(grid_size)==int:
         grid_size = [grid_size]*3
@@ -331,10 +368,10 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         ani = animation.ArtistAnimation(fig, imgs, interval=500, repeat_delay = 1000, blit=True)
         try:
             writer = animation.FFMpegWriter(fps=30, bitrate=1800)
-            ani.save(img_dir+f"/pred_animation_across_{slice_axis_colname}.mp4", writer=writer) 
+            ani.save(img_dir+"/mp4"+f"/{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.mp4", writer=writer) 
         except:
             print('Saving animation in .mp4 format, try installing ffmpeg package. \n Saving to .gif instead')
-            ani.save(img_dir+f"/pred_animation_across_{slice_axis_colname}.gif")
+            ani.save(img_dir+"/gif"+f"/{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.gif")
 
 def plot_demo(num_timestamps, grid_size, patch_size, img_dir):
     '''

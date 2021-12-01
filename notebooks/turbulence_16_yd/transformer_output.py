@@ -133,7 +133,7 @@ def predict_model(model, test_loader, epoch, config={},\
         if final_prediction == True:
             fig.savefig(root_dir + '/figs/final_plot' + f"/range{plot_range}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.png")
         else:
-            fig.savefig(root_dir + '/figs/tmp_plot' + f"/epoch{epoch}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.png")
+            fig.savefig(root_dir + '/figs/tmp_plot' + f"/pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}_epoch{epoch}.png")
             if epoch == config['epochs']:
                 fig.savefig(root_dir + '/figs/final_plot'+ f"/range{plot_range}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.png")
         plt.close(fig)
@@ -150,9 +150,10 @@ if __name__ == "__main__":
     root_dir = '/scratch/yd1008/nyu-capstone/notebooks/turbulence_16_yd/tune_results/'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
+    plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
   
-    best_config = {'epochs':2, 'window_size': 10, 'patch_size': (4,4,1), 'pe_type': '3d', 'batch_size': 16, 'scale': False,\
-                    'feature_size': 120, 'num_enc_layers': 1, 'num_dec_layers': 1, 'num_head': 2, 'd_ff': 2048, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.9}
+    best_config = {'epochs':60, 'window_size': 5, 'patch_size': (6,6,6), 'pe_type': '3d_temporal', 'batch_size': 32, 'scale': True,'feature_size': 240\
+                , 'num_enc_layers': 2, 'num_dec_layers': 2, 'num_head': 4, 'd_ff': 1024, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.8, 'option': 'patch_overlap'}
     
     window_size = best_config['window_size']
     patch_size = best_config['patch_size']
@@ -167,6 +168,7 @@ if __name__ == "__main__":
     lr = best_config['lr']
     lr_decay = best_config['lr_decay']
     scale = best_config['scale']
+    option = best_config['option']
 
     # dataset parameters
     train_proportion = 0.6
@@ -207,11 +209,8 @@ if __name__ == "__main__":
     ### SPECIFYING use_coords=True WILL RETURN DATALOADERS FOR COORDS
     train_loader, test_loader, scaler = get_data_loaders(train_proportion, test_proportion, val_proportion,\
         pred_size = 1, batch_size = batch_size, num_workers = 2, pin_memory = False, use_coords = True, use_time = True,\
-        test_mode = True, scale = scale, window_size = window_size, patch_size = patch_size)
-
-    print(f'Total of {len(train_loader.dataset)} samples in training set and {len(test_loader.dataset)} samples in test set')
-    print(f'Training with pe type: {pe_type} and input type: {input_type}')
-
+        test_mode = True, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
+    
     epochs = best_config['epochs']
     train_losses = []
     test_losses = []
@@ -254,7 +253,7 @@ if __name__ == "__main__":
 
             print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, test_loss: {avg_test_loss}, lr: {scheduler.get_last_lr()}, training time: {time.time()-start_time} s', flush=True)
 
-            if (epoch%2 == 0):
+            if (epoch%5 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
                 predict_model(model, test_loader, epoch, config=best_config,\
                                     plot=True, plot_range=[0,0.01], final_prediction=False)   
