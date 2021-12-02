@@ -152,8 +152,8 @@ if __name__ == "__main__":
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
   
-    best_config = {'epochs':60, 'window_size': 5, 'patch_size': (6,6,6), 'pe_type': '3d_temporal', 'batch_size': 32, 'scale': True,'feature_size': 240\
-                , 'num_enc_layers': 2, 'num_dec_layers': 2, 'num_head': 4, 'd_ff': 1024, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.8, 'option': 'patch_overlap'}
+    best_config = {'epochs':5, 'window_size': 5, 'patch_size': (6,6,6), 'pe_type': '3d_temporal', 'batch_size': 32, 'scale': True,'feature_size': 300\
+                , 'num_enc_layers': 2, 'num_dec_layers': 2, 'num_head': 4, 'd_ff': 512, 'dropout': 0.1, 'lr': 1e-6, 'lr_decay': 0.8, 'option': 'patch_overlap'}
     
     window_size = best_config['window_size']
     patch_size = best_config['patch_size']
@@ -253,7 +253,7 @@ if __name__ == "__main__":
 
             print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, test_loss: {avg_test_loss}, lr: {scheduler.get_last_lr()}, training time: {time.time()-start_time} s', flush=True)
 
-            if (epoch%5 == 0):
+            if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
                 predict_model(model, test_loader, epoch, config=best_config,\
                                     plot=True, plot_range=[0,0.01], final_prediction=False)   

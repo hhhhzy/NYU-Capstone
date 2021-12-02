@@ -121,11 +121,12 @@ def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_propor
 
         train = windows[:train_data_size]
         val = windows[val_start_index:val_start_index+val_data_size]
-        if option == 'patch_overlap': ###Retain the non-overlap test set in patch mode
-            test = train_test_val_split(data, meshed_blocks, train_proportion, val_proportion, test_proportion, pred_size, scale, window_size, patch_size, option='patch')[2]
-            test = test.numpy() ###Might not be efficient...
-        else: 
-            test = windows[val_start_index+val_data_size:]
+        test = windows[val_start_index+val_data_size:]
+        # if option == 'patch_overlap': ###Retain the non-overlap test set in patch mode
+        #     test = train_test_val_split(data, meshed_blocks, train_proportion, val_proportion, test_proportion, pred_size, scale, window_size, patch_size, option='patch')[2]
+        #     test = test.numpy() ###Might not be efficient...
+        # else: 
+        #     test = windows[val_start_index+val_data_size:]
     else:
         windows = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
 
@@ -288,7 +289,9 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
     print('Processing dataframe...')
     for timestamp in timestamps:
         single_simulation_df = preds_all.loc[(preds_all[time_colname]==timestamp)]
-        if single_simulation_df.shape[0]==predictions_per_simulation:
+        if single_simulation_df.shape[0]>=predictions_per_simulation:
+            if single_simulation_df.shape[0]>predictions_per_simulation:
+                single_simulation_df = single_simulation_df.groupby([time_colname]+axis_colnames).mean().reset_index()
             result_dict[timestamp] = {}
             result_dict[timestamp]['slice_axis_val'] = []
             result_dict[timestamp]['preds'] = []
