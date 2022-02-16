@@ -1,6 +1,7 @@
 #!/bin/bash python
 import os
 import numpy as np
+import pandas as pd
 import torch 
 import torch.nn as nn
 import matplotlib.pyplot as plt
@@ -31,10 +32,16 @@ def get_rho(data_path):
     rho = np.array(rho)
     meshed_blocks = (nx1, nx2, nx3)
     timestamps = np.array(timestamps)
-    rho_reshaped = rho.flatten()
     coords = np.array(coords)
-    print(f'rho shape: {rho_reshaped.shape}, coords shape: {coords.shape}')
-    return rho_reshaped, meshed_blocks, coords, timestamps
+    rho_original = rho.flatten()
+    ### TEST: predict all residuals instead of rhos
+    rho_residual = (np.roll(rho_original,-nx1*nx2*nx3)-rho_original)[:-nx1*nx2*nx3] ### Residual
+    rho_original = rho_original[:-nx1*nx2*nx3] ### to reconstruct truth from residuals, take the first meshblock of rho_original and add the residuals.
+    timestamps = timestamps[nx1*nx2*nx3:]
+    coords = coords[nx1*nx2*nx3:]
+
+    print(f'rho shape: {rho_original.shape}, coords shape: {coords.shape}')
+    return rho_original, rho_residual, meshed_blocks, coords, timestamps
 
 
 def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16), option='patch'):
@@ -101,8 +108,9 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
 
 def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
               , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch'):
+      
+    scaler = StandardScaler()
     if scale == True:
-        scaler = StandardScaler()
         data = scaler.fit_transform(data.reshape(-1, 1)).reshape(-1)
     if option in ['patch','patch_overlap']: ### Force each set start on a new block
         windows, patches_per_block = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
@@ -141,10 +149,9 @@ def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_propor
     train_data = torch.from_numpy(train).float()
     val_data = torch.from_numpy(val).float()
     test_data = torch.from_numpy(test).float()
-    if scale == True:
-        return train_data,val_data,test_data,scaler
-    else:
-        return train_data,val_data,test_data
+    
+    return train_data,val_data,test_data,scaler
+    
 
 
 ## Adjust __init__ to fit the inputs
@@ -168,15 +175,17 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
     np.random.seed(505)
     
     data_path='/scratch/yd1008/nyu-capstone/data_turb_dedt1_16'
-    data, meshed_blocks, coords, timestamps = get_rho(data_path)
+    data_original, data, meshed_blocks, coords, timestamps = get_rho(data_path) ### data now are the residuals
+
 
     ###FOR SIMPLE TEST SINE AND COSINE 
     #long_range_stationary_x_vals = (np.sin(2*np.pi*time_vec/period))+(np.cos(3*np.pi*time_vec/period)) + 0.25*np.random.randn(time_vec.size)
     ###FOR ARFIMA TEST
     #data = arfima([0.5,0.4],0.3,[0.2,0.1],10000,warmup=2^10)
+
     if use_coords:
         print('-'*20,'split for coords')
-        train_coords,val_coords,test_coords = train_test_val_split(\
+        train_coords,val_coords,test_coords, _ = train_test_val_split(\
             coords, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
             , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
@@ -185,23 +194,46 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
 
     if use_time:
         print('-'*20,'split for timestamp')
-        train_timestamps,val_timestamps,test_timestamps = train_test_val_split(\
+        train_timestamps,val_timestamps,test_timestamps, _ = train_test_val_split(\
             timestamps, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
             , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
         print(f'train_timestamps: {train_timestamps.shape}')
 
-    print('-'*20,'split for data')
+    print('-'*20,'split for residual')
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
         , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
     print(f'train_data: {train_data.shape}')
 
+    print('-'*20,'split for data_original')
+    train_data_original,val_data_original,test_data_original, scaler = train_test_val_split(\
+        data_original, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
+        , val_proportion = val_proportion, test_proportion = test_proportion\
+        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
+    print(f'train_data_original: {train_data_original.shape}')
+
+    ### Save original data for prediction based on residuals
+    a = np.hstack([timestamps.reshape(-1,1), coords, data_original.reshape(-1,1)])
+    a = a[np.argsort(a[:, 3])]
+    a = a[np.argsort(a[:, 2], kind='stable')]
+    a = a[np.argsort(a[:, 1], kind='stable')]
+    a = a[np.argsort(a[:, 0], kind='stable')]
+    if scale==True:
+        data_origin_dict = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'truth_original':scaler.inverse_transform(a[:,4])}
+    elif scale==False:
+        data_origin_dict = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'truth_original':a[:,4]}
+    data_origin_df = pd.DataFrame.from_dict(data_origin_dict)
+    data_origin_df.to_csv('/scratch/yd1008/nyu-capstone/notebooks/turbulence_16_yd/tune_results/' + '/data_original.csv')
+    print(data_origin_df,flush=True)
+    
     if test_mode:
         train_val_data = torch.cat((train_data,val_data),0)
         train_val_coords = torch.cat((train_coords,val_coords),0)
         train_val_timestamps = torch.cat((train_timestamps,val_timestamps),0)
+
+        ### Get the first block in test_original to perform rollout that gives back the original data based on predicted residuals
 
         dataset_train_val, dataset_test = CustomDataset(train_val_data,train_val_coords,train_val_timestamps), CustomDataset(test_data,test_coords,test_timestamps)
         train_val_loader = torch.utils.data.DataLoader(dataset_train_val, batch_size=batch_size, \

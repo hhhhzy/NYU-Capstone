@@ -35,7 +35,7 @@ class early_stopping():
                 print('Early stopping')
             print(f'----Current loss {val_loss} higher than best loss {self.best_loss}, early stop counter {self.counter}----')
     
-def process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size):
+def process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size): 
     x1, x2, x3 = patch_size
     dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
     dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-x1*x2*x3),:], dec_inp], dim=1).float().to(device)
@@ -43,7 +43,7 @@ def process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size
 
     return outputs, tgt
 
-def evaluate(model,data_loader,criterion, patch_size):
+def evaluate(model,data_loader,criterion, patch_size, predict_res = False):
     model.eval()    
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
@@ -59,6 +59,8 @@ def evaluate(model,data_loader,criterion, patch_size):
         for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(data_loader):
             src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                             src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
+            # if predict_res:
+            #     tgt = tgt-src
             dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
             dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-x1*x2*x3),:], dec_inp], dim=1).float().to(device)
             output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
@@ -67,7 +69,7 @@ def evaluate(model,data_loader,criterion, patch_size):
     return total_loss
 
 def predict_model(model, test_loader, epoch, config={},\
-                    plot=True, plot_range=[0,0.01], final_prediction=False):
+                    plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = False):
     '''
     Note: 
         Don't forget to create a subfolder 'final_plot' under 'figs'
@@ -92,31 +94,43 @@ def predict_model(model, test_loader, epoch, config={},\
         for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
             if i == 0:
                 enc_in = src
+                # if predict_res:
+                #     dec_in = tgt - src
+                
                 dec_in = tgt
                 test_rollout = tgt
             else:
                 enc_in = test_rollout[:,-tgt.shape[1]:,:]
-                dec_in = torch.zeros([enc_in.shape[0], x1*x2*x3, enc_in.shape[-1]]).float()
-                dec_in = torch.cat([enc_in[:,:(tgt.shape[1]-x1*x2*x3),:], dec_in], dim=1).float()
+                if predict_res: ###only implemented for pred_size==1 patch
+                    res = enc_in[:,x1*x2*x3:,:]-enc_in[:,:-x1*x2*x3,:]
+                    dec_in = torch.zeros([enc_in.shape[0], x1*x2*x3, enc_in.shape[-1]]).float()
+                    dec_in = torch.cat([res, dec_in], dim=1).float()
+                else:
+                    dec_in = torch.zeros([enc_in.shape[0], x1*x2*x3, enc_in.shape[-1]]).float()
+                    #dec_in = torch.cat([enc_in[:,:(tgt.shape[1]-x1*x2*x3),:], dec_in], dim=1).float()
+                    dec_in = torch.cat([enc_in[:,x1*x2*x3:,:], dec_in], dim=1).float()
                 #dec_in = enc_in[:,:(window_size-1),:]
             enc_in, dec_in, tgt = enc_in.to(device), dec_in.to(device), tgt.to(device)
             src_coord, tgt_coord, src_ts, tgt_ts = src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-            
+
             output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
+            # if predict_res:
+            #     output = output + enc_in
             test_rollout = torch.cat([test_rollout,output[:,-x1*x2*x3:,:].detach().cpu()],dim = 1)
             test_ts = torch.cat((test_ts, tgt_ts[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
             test_coord = torch.cat((test_coord, tgt_coord[:,-x1*x2*x3:,:].reshape(-1,3).detach().cpu()), 0)
             truth = torch.cat((truth, tgt[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
             test_result = torch.cat((test_result, output[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
+            
         a = torch.cat([test_ts.unsqueeze(-1), test_coord, test_result.unsqueeze(-1), truth.unsqueeze(-1)], dim=-1)
         a = a.numpy()
         a = a[np.argsort(a[:, 3])]
         a = a[np.argsort(a[:, 2], kind='stable')]
         a = a[np.argsort(a[:, 1], kind='stable')]
         a = a[np.argsort(a[:, 0], kind='stable')]
-        if scale==True:
+        if config['scale']==True:
             final_result = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'prediction': scaler.inverse_transform(a[:,4]), 'truth':scaler.inverse_transform(a[:,5])}
-        elif scale==False:
+        elif config['scale']==False:
             final_result = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'prediction': a[:,4], 'truth':a[:,5]}
     
     if plot==True:
@@ -152,8 +166,8 @@ if __name__ == "__main__":
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
   
-    best_config = {'epochs':5, 'window_size': 5, 'patch_size': (6,6,6), 'pe_type': '3d_temporal', 'batch_size': 32, 'scale': True,'feature_size': 300\
-                , 'num_enc_layers': 2, 'num_dec_layers': 2, 'num_head': 4, 'd_ff': 512, 'dropout': 0.1, 'lr': 1e-6, 'lr_decay': 0.8, 'option': 'patch_overlap'}
+    best_config = {'epochs':20, 'window_size': 8, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': True,'feature_size': 240\
+                , 'num_enc_layers': 3, 'num_dec_layers': 2, 'num_head': 8, 'd_ff': 1024, 'dropout': 0.1, 'lr': 1e-5, 'lr_decay': 0.8, 'option': 'patch', 'predict_res': False}
     
     window_size = best_config['window_size']
     patch_size = best_config['patch_size']
@@ -169,6 +183,7 @@ if __name__ == "__main__":
     lr_decay = best_config['lr_decay']
     scale = best_config['scale']
     option = best_config['option']
+    predict_res = best_config['predict_res']
 
     # dataset parameters
     train_proportion = 0.6
@@ -214,9 +229,9 @@ if __name__ == "__main__":
     epochs = best_config['epochs']
     train_losses = []
     test_losses = []
-    tolerance = 10
+    tolerance = 5
     best_test_loss = float('inf')
-    Early_Stopping = early_stopping(patience=5)
+    Early_Stopping = early_stopping(patience=tolerance)
     counter_old = 0
     x1, x2, x3 = patch_size
 
@@ -233,6 +248,10 @@ if __name__ == "__main__":
                 src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                                 src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
                 optimizer.zero_grad()
+                
+                # if predict_res:
+                #     tgt = tgt-src
+                
                 output, truth = process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size)
                 loss = criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:])
                 total_loss += loss.item()
@@ -240,7 +259,7 @@ if __name__ == "__main__":
                 optimizer.step()
 
             avg_train_loss = total_loss*batch_size/len(train_loader.dataset)
-            total_test_loss = evaluate(model, test_loader, criterion, patch_size=patch_size)
+            total_test_loss = evaluate(model, test_loader, criterion, patch_size=patch_size, predict_res = predict_res)
             avg_test_loss = total_test_loss/len(test_loader.dataset)
 
             
@@ -256,7 +275,7 @@ if __name__ == "__main__":
             if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
                 predict_model(model, test_loader, epoch, config=best_config,\
-                                    plot=True, plot_range=[0,0.01], final_prediction=False)   
+                                    plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = predict_res)   
 
             writer.add_scalar('train_loss',avg_train_loss,epoch)
             writer.add_scalar('test_loss',avg_test_loss,epoch)
@@ -291,7 +310,7 @@ if __name__ == "__main__":
 ### Predict
     start_time = time.time()
     final_result = predict_model(model, test_loader,  epoch, config=best_config,\
-                                            plot=True, plot_range=[0,1], final_prediction=True)
+                                            plot=True, plot_range=[0,1], final_prediction=True, predict_res = predict_res)
     prediction = final_result['prediction']
     print('-'*20 + ' Measure for Simulation Speed ' + '-'*20)
     print(f'Time to forcast {len(prediction)} samples: {time.time()-start_time} s' )
