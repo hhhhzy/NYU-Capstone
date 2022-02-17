@@ -204,6 +204,8 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
                         pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
                         plot_anime = True, img_dir = 'figs/', config=best_config)   
     '''
+    
+
     if len(grid_size)!=3:
         grid_size = [grid_size]*3
     if type(pred_df)== str:
