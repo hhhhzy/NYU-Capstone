@@ -2,6 +2,7 @@
 import os
 import numpy as np
 import pandas as pd
+import math
 import torch 
 import torch.nn as nn
 import matplotlib.pyplot as plt
@@ -12,7 +13,7 @@ from utils import *
 from athena_read import *
 from sklearn.preprocessing import StandardScaler
 
-def get_rho(data_path):
+def get_rho(data_path, predict_res = False):
     lst = sorted(os.listdir(data_path))[4:]
     rho = []
     coords = []
@@ -34,20 +35,25 @@ def get_rho(data_path):
     timestamps = np.array(timestamps)
     coords = np.array(coords)
     rho_original = rho.flatten()
+
     ### TEST: predict all residuals instead of rhos
-    rho_residual = (np.roll(rho_original,-nx1*nx2*nx3)-rho_original)[:-nx1*nx2*nx3] ### Residual
-    rho_original = rho_original[:-nx1*nx2*nx3] ### to reconstruct truth from residuals, take the first meshblock of rho_original and add the residuals.
-    timestamps = timestamps[nx1*nx2*nx3:]
-    coords = coords[nx1*nx2*nx3:]
+    if predict_res:
+        rho_residual = (np.roll(rho_original,-nx1*nx2*nx3)-rho_original)[:-nx1*nx2*nx3] ### Residual
+        timestamps = timestamps[nx1*nx2*nx3:]
+        coords = coords[nx1*nx2*nx3:]
+        #rho_original = rho_original[:-nx1*nx2*nx3] ### to reconstruct truth from residuals, take the first meshblock of rho_original and add the residuals.
+        return rho_original[nx1*nx2*nx3:], rho_residual, meshed_blocks, coords, timestamps
+    else: 
+        return rho_original, meshed_blocks, coords, timestamps
+    # print(f'rho shape: {rho_original.shape}, coords shape: {coords.shape}')
+    # return rho_original, rho_residual, meshed_blocks, coords, timestamps
 
-    print(f'rho shape: {rho_original.shape}, coords shape: {coords.shape}')
-    return rho_original, rho_residual, meshed_blocks, coords, timestamps
 
-
-def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16), option='patch'):
+def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16), option='patch', patch_stride = (1,1,1)):
     """
     window_size: Here represents the number of time steps in each window
     patch_size: (x1,x2,x3), determines the shape of the cuboid patch
+    patch_stride: (s1,s2,s3), how many number of values patches move around in each meshblock in x,y,z direction
     """
     out = []
     if option == 'space':
@@ -89,12 +95,12 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
     elif option == 'patch_overlap':
         x1, x2, x3 = patch_size
         nx1, nx2, nx3 = meshed_blocks
-
+        stride_x, stride_y, stride_z = patch_stride
         vertices = []
         for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
-            for k in range(nx3-x3+1):
-                for j in range(nx2-x2+1):
-                    for i in range(nx1-x1+1):
+            for k in range(math.floor((nx3-x3)/stride_z+1)):
+                for j in range(math.floor((nx2-x2)/stride_y+1)):
+                    for i in range(math.floor((nx1-x1)/stride_x+1)):
                         vertices.append(t*nx1*nx2*nx3 + k*nx1*nx2 + j*nx1 + i)
         for i in vertices:
             feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
@@ -171,11 +177,14 @@ class CustomDataset(torch.utils.data.Dataset):
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
                         use_coords = True, use_time = True, test_mode = False, scale = False, \
-                        window_size = 10, patch_size=(1,1,16), option='patch'): 
+                        window_size = 10, patch_size=(1,1,16), option='patch', predict_res=False): 
     np.random.seed(505)
     
     data_path='/scratch/yd1008/nyu-capstone/data_turb_dedt1_16'
-    data_original, data, meshed_blocks, coords, timestamps = get_rho(data_path) ### data now are the residuals
+    if predict_res:
+        data_original, data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res) 
+    else:
+        data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res) 
 
 
     ###FOR SIMPLE TEST SINE AND COSINE 
@@ -200,34 +209,37 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
             , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
         print(f'train_timestamps: {train_timestamps.shape}')
 
-    print('-'*20,'split for residual')
+    print('-'*20,'split for data')
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
         , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
     print(f'train_data: {train_data.shape}')
 
-    print('-'*20,'split for data_original')
-    train_data_original,val_data_original,test_data_original, scaler = train_test_val_split(\
-        data_original, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
-        , val_proportion = val_proportion, test_proportion = test_proportion\
-        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
-    print(f'train_data_original: {train_data_original.shape}')
+#----------------------------------------------------------------
+### Save the original data table for reconstructing from residual predictions. May need to be optimized?
+    if predict_res: 
+        print(f'timestamps shape: {timestamps.shape},coords shape: {coords.shape},data_original shape: {data_original.shape}')
+        # print('-'*20,'split for data_original')
+        # train_data_original,val_data_original,test_data_original, scaler = train_test_val_split(\
+        #     data_original, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
+        #     , val_proportion = val_proportion, test_proportion = test_proportion\
+        #     , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
+        # print(f'train_data_original: {train_data_original.shape}')
+        a = np.hstack([timestamps.reshape(-1,1), coords, data_original.reshape(-1,1)])
+        a = a[np.argsort(a[:, 3])]
+        a = a[np.argsort(a[:, 2], kind='stable')]
+        a = a[np.argsort(a[:, 1], kind='stable')]
+        a = a[np.argsort(a[:, 0], kind='stable')]
+        if scale==True:
+            data_origin_dict = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'truth_original':scaler.inverse_transform(a[:,4])}
+        elif scale==False:
+            data_origin_dict = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'truth_original':a[:,4]}
+        data_origin_df = pd.DataFrame.from_dict(data_origin_dict)
+        data_origin_df.to_csv('/scratch/yd1008/nyu-capstone/notebooks/turbulence_16_yd/tune_results/' + '/data_original.csv')
+        #print(data_origin_df,flush=True)
+ #----------------------------------------------------------------   
 
-    ### Save original data for prediction based on residuals
-    a = np.hstack([timestamps.reshape(-1,1), coords, data_original.reshape(-1,1)])
-    a = a[np.argsort(a[:, 3])]
-    a = a[np.argsort(a[:, 2], kind='stable')]
-    a = a[np.argsort(a[:, 1], kind='stable')]
-    a = a[np.argsort(a[:, 0], kind='stable')]
-    if scale==True:
-        data_origin_dict = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'truth_original':scaler.inverse_transform(a[:,4])}
-    elif scale==False:
-        data_origin_dict = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'truth_original':a[:,4]}
-    data_origin_df = pd.DataFrame.from_dict(data_origin_dict)
-    data_origin_df.to_csv('/scratch/yd1008/nyu-capstone/notebooks/turbulence_16_yd/tune_results/' + '/data_original.csv')
-    print(data_origin_df,flush=True)
-    
     if test_mode:
         train_val_data = torch.cat((train_data,val_data),0)
         train_val_coords = torch.cat((train_coords,val_coords),0)
@@ -306,7 +318,10 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         preds_all = pd.read_csv(pred_df,index_col=None)
     else:
         preds_all = pred_df
-        
+
+    v_max, v_min = max(preds_all[truth_colname].values),min(preds_all[truth_colname].values)
+    v_max_res, v_min_res = max(preds_all[truth_colname].values-preds_all[pred_colname].values),min(preds_all[truth_colname].values-preds_all[pred_colname].values)
+
     predictions_per_simulation = np.prod(grid_size)
     slice_axis_colname = axis_colnames[slice_axis_index]
     #nonslice_axis_colname = axis_colnames.remove(slice_axis_colname)
@@ -349,21 +364,23 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         truth = result_dict[ts]['truth']
         for i in range(slice_axis_shape):
             if ts_idx==0:
-                axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=False)
-                #fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
                 axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
-                axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=False)
-                #fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
-                axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=False)
-                #fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
+                im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
+                im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],vmin=v_min_res, vmax=v_max_res,aspect='equal',animated=False)
+                
+                fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
+                fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
             else:
-                axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=True)
-                #fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=True)
                 axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
-                axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=True)
-                #fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
-                axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=True)
-                #fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
+                im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],vmin=v_min, vmax=v_max, aspect='equal',animated=True)
+                im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],vmin=v_min_res, vmax=v_max_res, aspect='equal',animated=True)
+                
+                fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
+                fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
 
         axes[-1,0].annotate('Forecast',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
         axes[-1,1].annotate('Truth',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
@@ -385,15 +402,15 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
             tmp_imgs = []
             for i in range(slice_axis_shape):
                 if ts_idx==0:
-                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=False)
+                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
                     axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
-                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=False)
-                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=False)
+                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
+                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],vmin=v_min_res, vmax=v_max_res, aspect='equal',animated=False)
                 else:
-                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=True)
+                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=True)
                     axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
-                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=True)
-                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=True)
+                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],vmin=v_min, vmax=v_max, aspect='equal',animated=True)
+                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],vmin=v_min_res, vmax=v_max_res, aspect='equal',animated=True)
                     tmp_imgs.extend([im_pred,im_truth,im_residual])
             imgs.append(tmp_imgs)
         axes[-1,0].annotate('Forecast',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
