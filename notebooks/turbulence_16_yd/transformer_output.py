@@ -77,7 +77,7 @@ def predict_model(model, test_loader, epoch, config={},\
         config: dictionary, the config of this plot, used for saving distinguishable plots for each trail
     '''
     model.eval()
-    test_rollout = torch.Tensor(0)   
+    test_rollout = {}#torch.Tensor(0)   
     test_result = torch.Tensor(0) 
     truth = torch.Tensor(0) 
     test_ts = torch.Tensor(0)
@@ -90,19 +90,18 @@ def predict_model(model, test_loader, epoch, config={},\
     
     with torch.no_grad():
         for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
-            if i == 0:
+            if test_rollout.get(tgt_coord) == None:
                 enc_in = src
                 dec_in = tgt
-                test_rollout = tgt
             else:
-                enc_in = test_rollout[:,-tgt.shape[1]:,:]
+                enc_in = test_rollout[tgt_coord][:,-tgt.shape[1]:,:] 
                 dec_in = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float()
-                dec_in = torch.cat([tgt[:,:-x1*x2*x3,:], dec_in], dim=1).float()
+                dec_in = torch.cat([test_rollout[tgt_coord][:,:-x1*x2*x3,:], dec_in], dim=1).float()
             enc_in, dec_in, tgt = enc_in.to(device), dec_in.to(device), tgt.to(device)
             src_coord, tgt_coord, src_ts, tgt_ts = src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
 
             output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
-            test_rollout = torch.cat([test_rollout,output[:,-x1*x2*x3:,:].detach().cpu()],dim = 1)
+            test_rollout[tgt_coord] = torch.cat([test_rollout.get(tgt_coord, tgt[:,x1*x2*x3:,:]),output[:,-x1*x2*x3:,:]], dim=1).detach().cpu()
             test_ts = torch.cat((test_ts, tgt_ts[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
             test_coord = torch.cat((test_coord, tgt_coord[:,-x1*x2*x3:,:].reshape(-1,3).detach().cpu()), 0)
             truth = torch.cat((truth, tgt[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
@@ -120,7 +119,7 @@ def predict_model(model, test_loader, epoch, config={},\
             final_result = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'prediction': a[:,4], 'truth':a[:,5]}
         if predict_res:
             residuals = pd.DataFrame.from_dict(final_result)
-            truth = pd.read_csv('saved_preds/data_original.csv',index_col=0)
+            truth = pd.read_csv('tune_results/data_original.csv',index_col=0)
             ### Group by time since last timestamp is duplicated
             truth.time = np.round(truth.time.values,5)
             residuals.time = np.round(residuals.time.values,5)
@@ -175,7 +174,7 @@ if __name__ == "__main__":
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
   
-    best_config = {'epochs':20, 'window_size': 3, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': False,'feature_size': 960\
+    best_config = {'epochs':30, 'window_size': 3, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': False,'feature_size': 1920\
                 , 'num_enc_layers': 1, 'num_dec_layers': 4, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-6, 'lr_decay': 0.8, 'option': 'patch'\
                 , 'predict_res': True, 'mask_type':'patch','decoder_only':True}
     
@@ -257,6 +256,7 @@ if __name__ == "__main__":
             start_time = time.time()
 
             for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
+                #print(f'i: {i}, src_coord: {src_coord}, tgt_coord: {tgt_coord}, src_ts: {src_ts}, tgt_ts: {tgt_ts}', flush=True)
                 src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                                 src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
                 optimizer.zero_grad()

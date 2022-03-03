@@ -12,7 +12,10 @@ from _arfima import arfima
 from utils import *
 from athena_read import *
 from sklearn.preprocessing import StandardScaler
-
+### VARIABLES(KEYS) IN DATASET
+# dict_keys(['Coordinates', 'DatasetNames', 'MaxLevel', 'MeshBlockSize', 'NumCycles', \
+# 'NumMeshBlocks', 'NumVariables', 'RootGridSize', 'RootGridX1', 'RootGridX2', 'RootGridX3', \
+# 'Time', 'VariableNames', 'x1f', 'x1v', 'x2f', 'x2v', 'x3f', 'x3v', 'rho', 'press', 'vel1', 'vel2', 'vel3'])
 def get_rho(data_path, predict_res = False):
     lst = sorted(os.listdir(data_path))[4:]
     rho = []
@@ -29,6 +32,7 @@ def get_rho(data_path, predict_res = False):
         timestamp_repeated = [d['Time']]*(np.prod(d['rho'].shape))
         timestamps.extend(timestamp_repeated) 
         coords.extend(coord)
+        #print(f"Name: {name}, keys: {d.keys()}", flush=True)#x1v: {d['x1v']}, x2v: {d['x2v']}, x3v:{d['x3v']}
 
     rho = np.array(rho)
     meshed_blocks = (nx1, nx2, nx3)
@@ -86,9 +90,9 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
 
         for i in vertices:
             feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
-                                for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])
+                                for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])
             target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
-                                for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])      
+                                for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])  
             out.append((feature,target))
         patches_per_block = np.prod([nx1//x1,nx2//x2,nx3//x3])
         
@@ -219,13 +223,6 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
 #----------------------------------------------------------------
 ### Save the original data table for reconstructing from residual predictions. May need to be optimized?
     if predict_res: 
-        print(f'timestamps shape: {timestamps.shape},coords shape: {coords.shape},data_original shape: {data_original.shape}')
-        # print('-'*20,'split for data_original')
-        # train_data_original,val_data_original,test_data_original, scaler = train_test_val_split(\
-        #     data_original, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
-        #     , val_proportion = val_proportion, test_proportion = test_proportion\
-        #     , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
-        # print(f'train_data_original: {train_data_original.shape}')
         a = np.hstack([timestamps.reshape(-1,1), coords, data_original.reshape(-1,1)])
         a = a[np.argsort(a[:, 3])]
         a = a[np.argsort(a[:, 2], kind='stable')]
