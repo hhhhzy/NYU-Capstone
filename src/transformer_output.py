@@ -356,5 +356,5 @@ if __name__ == "__main__":
                         plot_anime = True, img_dir = img_dir, config=best_config) 
 
 ### plot value at specific positions against rollout timesteps
-    pt_plot(final_result, nrows=3, ncols=3, grid_size = 16, pts_selection='movement', root_dir=root_dir)
+    pt_plot(root_dir=root_dir, final_result=final_result, nrows=3, ncols=3, grid_size = 16, pts_selection='movement')
     
