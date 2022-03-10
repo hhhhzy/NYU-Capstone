@@ -2,14 +2,21 @@
 import os
 import numpy as np
 import pandas as pd
+import math
 import torch 
 import torch.nn as nn
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib import patches
+from _arfima import arfima
+from utils import *
 from athena_read import *
 from sklearn.preprocessing import StandardScaler
-from matplotlib import animation
-import matplotlib.pyplot as plt
-
-def get_rho(data_path):
+### VARIABLES(KEYS) IN DATASET
+# dict_keys(['Coordinates', 'DatasetNames', 'MaxLevel', 'MeshBlockSize', 'NumCycles', \
+# 'NumMeshBlocks', 'NumVariables', 'RootGridSize', 'RootGridX1', 'RootGridX2', 'RootGridX3', \
+# 'Time', 'VariableNames', 'x1f', 'x1v', 'x2f', 'x2v', 'x3f', 'x3v', 'rho', 'press', 'vel1', 'vel2', 'vel3'])
+def get_rho(data_path, predict_res = False):
     lst = sorted(os.listdir(data_path))[4:-1]
     rho = []
     coords = []
@@ -23,73 +30,141 @@ def get_rho(data_path):
         coord = np.transpose(np.array(np.meshgrid(np.arange(nx1),np.arange(nx2),np.arange(nx3))), axes=[2,1,3,0]).reshape(-1,3)
         rho.append(d['rho'])
         timestamp_repeated = [d['Time']]*(np.prod(d['rho'].shape))
-        timestamps.extend(timestamp_repeated) ### Add nx1*nx2*nx3 time values into the output list
-        #print('rho:',d['rho'].shape, 'coord.shape:',coord.shape,'len timestamp:',len(timestamp_repeated))
+        timestamps.extend(timestamp_repeated) 
         coords.extend(coord)
+        #print(f"Name: {name}, keys: {d.keys()}", flush=True)#x1v: {d['x1v']}, x2v: {d['x2v']}, x3v:{d['x3v']}
 
     rho = np.array(rho)
     meshed_blocks = (nx1, nx2, nx3)
     timestamps = np.array(timestamps)
-    uniq, index = np.unique(timestamps, return_index=True)
-    uniq[index.argsort()]
-    rho_reshaped = rho.flatten()
     coords = np.array(coords)
-    #print(f'rho shape: {rho_reshaped.shape}, coords shape: {coords.shape}')
-    return rho_reshaped, meshed_blocks, coords, timestamps
+    rho_original = rho.flatten()
+
+    ### TEST: predict all residuals instead of rhos
+    if predict_res:
+        rho_residual = (np.roll(rho_original,-nx1*nx2*nx3)-rho_original)[:-nx1*nx2*nx3] ### Residual
+        timestamps = timestamps[nx1*nx2*nx3:]
+        coords = coords[nx1*nx2*nx3:]
+        #rho_original = rho_original[:-nx1*nx2*nx3] ### to reconstruct truth from residuals, take the first meshblock of rho_original and add the residuals.
+        return rho_original[nx1*nx2*nx3:], rho_residual, meshed_blocks, coords, timestamps
+    else: 
+        return rho_original, meshed_blocks, coords, timestamps
+    # print(f'rho shape: {rho_original.shape}, coords shape: {coords.shape}')
+    # return rho_original, rho_residual, meshed_blocks, coords, timestamps
 
 
-
-def to_windowed(data, meshed_blocks, pred_size, window_size=10, patch_size=(1,1,16)):
+def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16), option='patch', patch_stride = (1,1,1)):
     """
     window_size: Here represents the number of time steps in each window
     patch_size: (x1,x2,x3), determines the shape of the cuboid patch
+    patch_stride: (s1,s2,s3), how many number of values patches move around in each meshblock in x,y,z direction
     """
     out = []
-    x1, x2, x3 = patch_size
-    nx1, nx2, nx3 = meshed_blocks
+    if option == 'space':
+        length = len(data) - window_size
+        for i in range(length):
+            feature = np.array(data[i:i+(window_size)])
+            target = np.array(data[i+pred_size:i+window_size+pred_size])
+            out.append((feature, target))
+        patches_per_block = None 
 
-    vertices = []
-    for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
-        for i in range(nx1//x1):
-            for j in range(nx2//x2):
-                for k in range(nx3//x3):
-                    vertices.append(t*nx1*nx2*nx3 + i*x1*nx2*nx3 + j*x2*nx3 + k*x3)
+    elif option == 'time':
+        nx1, nx2, nx3 = meshed_blocks
+        length = len(data)-nx1*nx2*nx3*window_size
+        for i in range(length):
+            feature  = np.array(data[[i+nx1*nx2*nx3*k for k in range(window_size)]])
+            target = np.array(data[[i+nx1*nx2*nx3*(k+pred_size) for k in range(window_size)]])        
+            out.append((feature,target))
+        patches_per_block = None 
 
-    for i in vertices:
-        feature  = np.array(data[[i + time*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
+    elif option == 'patch':
+        x1, x2, x3 = patch_size
+        nx1, nx2, nx3 = meshed_blocks
+
+        vertices = []
+        for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
+            for i in range(nx1//x1):
+                for j in range(nx2//x2):
+                    for k in range(nx3//x3):
+                        vertices.append(t*nx1*nx2*nx3 + i*x1*nx2*nx3 + j*x2*nx3 + k*x3)
+
+        for i in vertices:
+            feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
+                                for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])
+            target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
+                                for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])  
+            out.append((feature,target))
+        patches_per_block = np.prod([nx1//x1,nx2//x2,nx3//x3])
+        
+    elif option == 'patch_overlap':
+        x1, x2, x3 = patch_size
+        nx1, nx2, nx3 = meshed_blocks
+        stride_x, stride_y, stride_z = patch_stride
+        vertices = []
+        for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
+            for k in range(math.floor((nx3-x3)/stride_z+1)):
+                for j in range(math.floor((nx2-x2)/stride_y+1)):
+                    for i in range(math.floor((nx1-x1)/stride_x+1)):
+                        vertices.append(t*nx1*nx2*nx3 + k*nx1*nx2 + j*nx1 + i)
+        for i in vertices:
+            feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
                                 for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])
-        target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
+            target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
                                 for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])      
-        out.append((feature,target))
+            out.append((feature,target))
+        patches_per_block = np.prod([nx1-x1+1,nx2-x2+1,nx3-x3+1])
             
-    return np.array(out)
-
+    return np.array(out), patches_per_block
 
 def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
-              ,  pred_size = 1, scale = False, window_size=10, patch_size = (1,1,16)):
-
+              , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch'):
+      
     scaler = StandardScaler()
     if scale == True:
         data = scaler.fit_transform(data.reshape(-1, 1)).reshape(-1)
-    
-    x_vals = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size)
+    if option in ['patch','patch_overlap']: ### Force each set start on a new block
+        windows, patches_per_block = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
+        total_num_blocks = int(len(data)/np.prod(meshed_blocks)) #-(window_size-1)-(pred_size)
+        window_adjust_length = (window_size-1)+pred_size ###Move the sliding window to cover the data lost on the edges
 
-    total_len = len(x_vals)
-    train_len = int(total_len*train_proportion)
-    val_len = int(total_len*val_proportion)
-    
-    train = x_vals[0:train_len]
-    val = x_vals[train_len:(train_len+val_len)]
-    test = x_vals[(train_len+val_len):]
+        train_num_blocks = int(total_num_blocks*train_proportion)-window_adjust_length
+        val_num_blocks = int(total_num_blocks*val_proportion)
 
+        val_start_block = train_num_blocks
+
+        train_data_size = train_num_blocks*patches_per_block
+        val_data_size = val_num_blocks*patches_per_block
+
+        val_start_index = val_start_block*patches_per_block
+
+        train = windows[:train_data_size]
+        val = windows[val_start_index:val_start_index+val_data_size]
+        test = windows[val_start_index+val_data_size:]
+        # if option == 'patch_overlap': ###Retain the non-overlap test set in patch mode
+        #     test = train_test_val_split(data, meshed_blocks, train_proportion, val_proportion, test_proportion, pred_size, scale, window_size, patch_size, option='patch')[2]
+        #     test = test.numpy() ###Might not be efficient...
+        # else: 
+        #     test = windows[val_start_index+val_data_size:]
+    else:
+        windows = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
+
+        total_len = len(windows)
+        train_len = int(total_len*train_proportion)
+        val_len = int(total_len*val_proportion)
+        
+        train = windows[0:train_len]
+        val = windows[train_len:(train_len+val_len)]
+        test = windows[(train_len+val_len):]
+    print(train.shape,val.shape,test.shape)
     train_data = torch.from_numpy(train).float()
     val_data = torch.from_numpy(val).float()
     test_data = torch.from_numpy(test).float()
-
+    
     return train_data,val_data,test_data,scaler
+    
 
 
-### Adjust __init__ to fit the inputs
+## Adjust __init__ to fit the inputs
 class CustomDataset(torch.utils.data.Dataset):
     def __init__(self,x,coords,timestamp):
         self.x=x
@@ -103,17 +178,18 @@ class CustomDataset(torch.utils.data.Dataset):
         return((self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1)),(self.coords[idx][0], self.coords[idx][1]),(self.timestamp[idx][0].view(-1,1), self.timestamp[idx][1].view(-1,1)))
     
 
-def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25,\
+def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
                         use_coords = True, use_time = True, test_mode = False, scale = False, \
-                        window_size = 10, patch_size = (1,1,16)): 
-
-    #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                        window_size = 10, patch_size=(1,1,16), option='patch', predict_res=False): 
     np.random.seed(505)
     
     data_path='/scratch/zh2095/data_turb_dedt1_16'
-    #data_path='C:/Users/52673/Desktop/NYU MSDS/3-DS-1006 CAPSTONE/data_turb_dedt1_16'
-    data, meshed_blocks, coords, timestamps = get_rho(data_path)
+    if predict_res:
+        data_original, data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res) 
+    else:
+        data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res) 
+
 
     ###FOR SIMPLE TEST SINE AND COSINE 
     #long_range_stationary_x_vals = (np.sin(2*np.pi*time_vec/period))+(np.cos(3*np.pi*time_vec/period)) + 0.25*np.random.randn(time_vec.size)
@@ -122,31 +198,51 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
 
     if use_coords:
         print('-'*20,'split for coords')
-        train_coords,val_coords,test_coords, scaler = train_test_val_split(\
+        train_coords,val_coords,test_coords, _ = train_test_val_split(\
             coords, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size)
+            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
         print(f'train_coords: {train_coords.shape}')
+
 
     if use_time:
         print('-'*20,'split for timestamp')
-        train_timestamps,val_timestamps,test_timestamps, scaler = train_test_val_split(\
+        train_timestamps,val_timestamps,test_timestamps, _ = train_test_val_split(\
             timestamps, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size)
+            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
         print(f'train_timestamps: {train_timestamps.shape}')
 
     print('-'*20,'split for data')
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
-        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size)
+        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
     print(f'train_data: {train_data.shape}')
-    
+
+#----------------------------------------------------------------
+### Save the original data table for reconstructing from residual predictions. May need to be optimized?
+    if predict_res: 
+        a = np.hstack([timestamps.reshape(-1,1), coords, data_original.reshape(-1,1)])
+        a = a[np.argsort(a[:, 3])]
+        a = a[np.argsort(a[:, 2], kind='stable')]
+        a = a[np.argsort(a[:, 1], kind='stable')]
+        a = a[np.argsort(a[:, 0], kind='stable')]
+        if scale==True:
+            data_origin_dict = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'truth_original':scaler.inverse_transform(a[:,4])}
+        elif scale==False:
+            data_origin_dict = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'truth_original':a[:,4]}
+        data_origin_df = pd.DataFrame.from_dict(data_origin_dict)
+        data_origin_df.to_csv('/scratch/zh2095/nyu-capstone/yd_test/tune_results/' + '/data_original.csv')
+        #print(data_origin_df,flush=True)
+ #----------------------------------------------------------------   
+
     if test_mode:
         train_val_data = torch.cat((train_data,val_data),0)
         train_val_coords = torch.cat((train_coords,val_coords),0)
         train_val_timestamps = torch.cat((train_timestamps,val_timestamps),0)
+
+        ### Get the first block in test_original to perform rollout that gives back the original data based on predicted residuals
 
         dataset_train_val, dataset_test = CustomDataset(train_val_data,train_val_coords,train_val_timestamps), CustomDataset(test_data,test_coords,test_timestamps)
         train_val_loader = torch.utils.data.DataLoader(dataset_train_val, batch_size=batch_size, \
@@ -155,23 +251,32 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=1, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                         persistent_workers=True, prefetch_factor = 128) 
-
         return train_val_loader, test_loader, scaler
-    
     if not test_mode:                           
         dataset_train, dataset_test, dataset_val = CustomDataset(train_data,train_coords,train_timestamps), CustomDataset(test_data,test_coords,test_timestamps), CustomDataset(val_data,val_coords,val_timestamps)
 
         train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, \
-                                            drop_last=True, num_workers=num_workers, pin_memory=pin_memory,\
+                                            drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
         test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size, \
-                                            drop_last=True, num_workers=num_workers, pin_memory=pin_memory,\
+                                            drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
         val_loader = torch.utils.data.DataLoader(dataset_val, batch_size=batch_size, \
-                                            drop_last=True, num_workers=num_workers, pin_memory=pin_memory,\
+                                            drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
-
+       
         return train_loader,val_loader, test_loader
+
+# img_dir = 'figs' ###dir to save images to
+# pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) ###dir of csv file, or pandas dataframe
+
+
+# grid_size = [16,16,16]
+# axis_colnames = ['x1','x2','x3']
+# slice_axis_index = 0
+# pred_colname = 'prediction'
+# truth_colname = 'truth'
+# time_colname = 'time'
 
 
 def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], slice_axis_index=0, \
@@ -204,20 +309,22 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
                         pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
                         plot_anime = True, img_dir = 'figs/', config=best_config)   
     '''
-    
-
-    if len(grid_size)!=3:
+    if type(grid_size)==int:
         grid_size = [grid_size]*3
     if type(pred_df)== str:
         preds_all = pd.read_csv(pred_df,index_col=None)
     else:
         preds_all = pred_df
-        
+
+    v_max, v_min = max(preds_all[truth_colname].values),min(preds_all[truth_colname].values)
+    v_max_res, v_min_res = max(preds_all[truth_colname].values-preds_all[pred_colname].values),min(preds_all[truth_colname].values-preds_all[pred_colname].values)
+
     predictions_per_simulation = np.prod(grid_size)
     slice_axis_colname = axis_colnames[slice_axis_index]
     #nonslice_axis_colname = axis_colnames.remove(slice_axis_colname)
     slice_axis_shape = grid_size.pop(slice_axis_index)
     nonslice_axis_shape = grid_size
+
     timestamps = sorted(preds_all[time_colname].unique())
     axis_vals = sorted(preds_all[slice_axis_colname].unique())
 
@@ -226,7 +333,9 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
     print('Processing dataframe...')
     for timestamp in timestamps:
         single_simulation_df = preds_all.loc[(preds_all[time_colname]==timestamp)]
-        if single_simulation_df.shape[0]==predictions_per_simulation:
+        if single_simulation_df.shape[0]>=predictions_per_simulation:
+            if single_simulation_df.shape[0]>predictions_per_simulation:
+                single_simulation_df = single_simulation_df.groupby([time_colname]+axis_colnames).mean().reset_index()
             result_dict[timestamp] = {}
             result_dict[timestamp]['slice_axis_val'] = []
             result_dict[timestamp]['preds'] = []
@@ -252,28 +361,30 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         truth = result_dict[ts]['truth']
         for i in range(slice_axis_shape):
             if ts_idx==0:
-                axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=False)
-                #fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
                 axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
-                axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=False)
-                #fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
-                axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=False)
-                #fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
+                im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
+                im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],vmin=v_min_res, vmax=v_max_res,aspect='equal',animated=False)
+                
+                fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
+                fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
             else:
-                axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=True)
-                #fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=True)
                 axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
-                axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=True)
-                #fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
-                axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=True)
-                #fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
+                im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],vmin=v_min, vmax=v_max, aspect='equal',animated=True)
+                im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],vmin=v_min_res, vmax=v_max_res, aspect='equal',animated=True)
+                
+                fig.colorbar(im_truth,ax=axes[slice_axis_shape-i-1][1])
+                fig.colorbar(im_pred,ax=axes[slice_axis_shape-i-1][0])
+                fig.colorbar(im_residual,ax=axes[slice_axis_shape-i-1][2])
 
         axes[-1,0].annotate('Forecast',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
         axes[-1,1].annotate('Truth',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
         axes[-1,2].annotate('Residual',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
         #axes[-1,0].annotate('Slice number', (0, 0.5), xytext=(-50, 0), textcoords='offset points', xycoords='axes fraction', ha='left', va='center', size=15, rotation=90)
         fig.suptitle(f'Forecasts on slices across {slice_axis_colname} at timestamp {ts}',x=0.2,y=1,size=20)
-        plt.savefig(img_dir + '/tmp_plot' + f'/ts_{ts}_result.png', bbox_inches="tight")
+        plt.savefig(img_dir+f'/ts_{ts}_result.png', bbox_inches="tight")
         plt.close()
         
     if plot_anime:
@@ -288,15 +399,15 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
             tmp_imgs = []
             for i in range(slice_axis_shape):
                 if ts_idx==0:
-                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=False)
+                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
                     axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
-                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=False)
-                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=False)
+                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
+                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],vmin=v_min_res, vmax=v_max_res, aspect='equal',animated=False)
                 else:
-                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],aspect='equal',animated=True)
+                    im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=True)
                     axes[slice_axis_shape-i-1][0].set_ylabel(f'Slice {i}',size=15)
-                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],aspect='equal',animated=True)
-                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],aspect='equal',animated=True)
+                    im_truth = axes[slice_axis_shape-i-1][1].imshow(truth[i],vmin=v_min, vmax=v_max, aspect='equal',animated=True)
+                    im_residual = axes[slice_axis_shape-i-1][2].imshow(truth[i]-preds[i],vmin=v_min_res, vmax=v_max_res, aspect='equal',animated=True)
                     tmp_imgs.extend([im_pred,im_truth,im_residual])
             imgs.append(tmp_imgs)
         axes[-1,0].annotate('Forecast',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
@@ -310,3 +421,119 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         except:
             print('Saving animation in .mp4 format, try installing ffmpeg package. \n Saving to .gif instead')
             ani.save(img_dir+"/gif"+f"/{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.gif")
+
+def plot_demo(num_timestamps, grid_size, patch_size, img_dir):
+    '''
+    Parameters:
+        num_timestamps: int, number of simulations to draw
+        grid_size: int or list-like, dimensions of one meshblock
+        patch_size: list-like, dimensions of patches
+        img_dir: str, path to folder where plots are saved
+    '''
+    if type(grid_size)==int:
+        grid_size = [grid_size]*3
+    def explode(data):
+        size = np.array(data.shape)*2
+        data_e = np.zeros(size - 1, dtype=data.dtype)
+        data_e[::2, ::2, ::2] = data
+        return data_e
+
+    def create_indices(grid_size,patch_size):
+        n_voxels = np.zeros((grid_size[0], grid_size[1], grid_size[2]), dtype=bool)
+        n_voxels[-patch_size[0]:, :patch_size[1], -patch_size[2]:] = True
+        # n_voxels[-1, 0, :] = True
+        # n_voxels[1, 0, 2] = True
+        # n_voxels[2, 0, 1] = True
+        facecolors = np.where(n_voxels, '#FFD65DC0', '#7A88CCC0')
+        edgecolors = np.where(n_voxels, '#BFAB6E', '#7D84A6')
+        filled = np.ones(n_voxels.shape)
+
+        filled_2 = explode(filled)
+        fcolors_2 = explode(facecolors)
+        ecolors_2 = explode(edgecolors)
+
+        x, y, z = np.indices(np.array(filled_2.shape) + 1).astype(float) // 2
+        x[0::2, :, :] += 0.05
+        y[:, 0::2, :] += 0.05
+        z[:, :, 0::2] += 0.05
+        x[1::2, :, :] += 0.95
+        y[:, 1::2, :] += 0.95
+        z[:, :, 1::2] += 0.95
+        return x,y,z,filled_2,fcolors_2,ecolors_2
+
+    blocks_per_patch = np.prod(patch_size)
+    x_fullgrid, y_fullgrid, z_fullgrid,filled_fullgrid,fcolors_fullgrid,ecolors_fullgrid = create_indices(grid_size,patch_size)
+    x_flattened, y_flattened, z_flattened,filled_flattened,fcolors_flattened,ecolors_flattened = create_indices((blocks_per_patch,1,1),(blocks_per_patch,1,1))
+    fig = plt.figure(figsize=(3*num_timestamps,6))
+    transFigure = fig.transFigure.inverted()
+    for ts in range(num_timestamps):
+        ax1 = fig.add_subplot(2, num_timestamps, ts+1, projection='3d')
+        ax1.voxels(x_fullgrid, y_fullgrid, z_fullgrid, filled_fullgrid, facecolors=fcolors_fullgrid, edgecolors=ecolors_fullgrid)
+        ax1.set_axis_off()
+        ax1.set_title(f'Simulation @ t={ts+1}')
+        
+        ax2 = fig.add_subplot(2, num_timestamps, num_timestamps+ts+1, projection='3d')
+        ax2.voxels(x_flattened, y_flattened, z_flattened, filled_flattened, facecolors=fcolors_flattened, edgecolors=ecolors_flattened)
+        ax2.set_axis_off()
+        ax2.set_ylim(1-blocks_per_patch,1)
+        ax2.set_zlim(1-blocks_per_patch,1)
+        ax2.annotate('Flatten', xy=(0, 0), xytext=(-0.05, 0.12),fontsize=11)
+        if ts!=num_timestamps-1:
+            ax2.annotate('+', xy=(0, 0), xytext=(0.11, 0.06),fontsize=15)
+        
+        xyA = [0.01,-0.02]
+        xyB = [0.02,0.065]
+        coord1 = transFigure.transform(ax1.transData.transform(xyA))
+        coord2 = transFigure.transform(ax2.transData.transform(xyB))
+        arrow = patches.FancyArrowPatch(coord1,coord2,shrinkA=0,shrinkB=0,transform=fig.transFigure,color='Black',\
+                                        arrowstyle="-|>",mutation_scale=30,linewidth=1.5,)
+        fig.patches.append(arrow)
+
+    #plt.show()
+    plt.savefig(img_dir+'patch_demo.png', bbox_inches="tight", facecolor='white')
+
+
+
+def pt_plot(root_dir, final_result, nrows=3, ncols=3, grid_size = 16, pts_selection='movement'):
+    truth = final_result['prediction']
+    prediction = final_result['truth']
+    time = final_result['time']
+    num_timesteps = len(np.unique(time))
+    # number of points you want to plootted
+    num_pts = int(nrows*ncols)
+
+    if pts_selection == 'movement':  # points with the most total flucuation
+        lst = [truth[t*grid_size**3:(t+1)*grid_size**3] for t in range(num_timesteps)]
+        total_movement = 0
+        for t in range(num_timesteps-1):
+            total_movement += abs(lst[t+1]-lst[t]) 
+        movement_sort = total_movement.argsort()
+        idx = movement_sort[-num_pts:]
+
+    elif pts_selection == 'min':  # points with the min value at the initial state
+        initial = truth[:grid_size**3]
+        idx = initial.argsort()[:num_pts]
+
+    elif pts_selection == 'max':  # points with the max value at the initial state
+        initial = truth[:grid_size**3]
+        idx = initial.argsort()[-num_pts:]
+    
+    elif pts_selection == 'random':  # randomly selected points
+        idx = np.random.choice(grid_size**3, size=num_pts, replace=False)
+
+    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(20,12))
+    plt.suptitle(f'rho vs rollout timesteps at points selected by {pts_selection}', fontsize=20)
+    for i in range(nrows):
+        for j in range(ncols):
+            pt_truth = np.array([truth[idx[i*j+j] + t*grid_size**3] for t in range(num_timesteps)])
+            pt_pred = np.array([prediction[idx[i*j+j] + t*grid_size**3] for t in range(num_timesteps)])
+
+            ax[i,j].plot(pt_truth, label = 'truth', ls='-')
+            ax[i,j].plot(pt_pred, label = 'pred', ls='-')
+            ax[i,j].plot(pt_pred - pt_truth, label = 'residual', ls='-.')
+            ax[i,j].set_ylabel('turbulence density')
+            ax[i,j].set_xlabel('rollout timesteps')
+            ax[i,j].axhline(y=0)
+            ax[i,j].legend()
+    
+    fig.savefig(root_dir + '/figs/final_plot' + f"/points_{pts_selection}")

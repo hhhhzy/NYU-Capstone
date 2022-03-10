@@ -163,7 +163,6 @@ def train(config, checkpoint_dir):
             counter_old = counter_new
         if Early_Stopping.early_stop:
             break
-        
 
 
 if __name__ == "__main__":
