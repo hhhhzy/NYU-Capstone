@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import time
 import os
-from transformer import Tranformer
+from transformer_test import Transformer
 from utils import *
 
 class early_stopping():
@@ -174,7 +174,7 @@ if __name__ == "__main__":
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
   
-    best_config = {'epochs':30, 'window_size': 3, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': False,'feature_size': 1920\
+    best_config = {'epochs':2, 'window_size': 4, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': False,'feature_size': 480\
                 , 'num_enc_layers': 1, 'num_dec_layers': 4, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-6, 'lr_decay': 0.8, 'option': 'patch'\
                 , 'predict_res': True, 'mask_type':'patch','decoder_only':True}
     
@@ -209,7 +209,7 @@ if __name__ == "__main__":
     print(best_config, flush=True)
     print('-'*50, flush=True)
 
-    model = Tranformer(feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
+    model = Transformer(feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
         d_ff = d_ff, dropout=dropout,num_head=num_head,pe_type=pe_type,grid_size=grid_size,mask_type=mask_type,patch_size=patch_size,window_size=window_size,decoder_only=decoder_only)
 
 
