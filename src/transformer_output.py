@@ -34,12 +34,16 @@ class early_stopping():
                 self.early_stop = True
                 print('Early stopping')
             print(f'----Current loss {val_loss} higher than best loss {self.best_loss}, early stop counter {self.counter}----')
-    
+
 def process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size): 
     x1, x2, x3 = patch_size
-    # dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
-    # dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-x1*x2*x3),:], dec_inp], dim=1).float().to(device)
-    outputs = model(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts)
+    #dec_rollout = src[:,-x1*x2*x3:,:]
+    dec_rollout = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
+    for i in range(batch_size):
+        for j in range(x1*x2*x3):
+            dec_rollout[i,j,:] = torch.cat([tgt[i,j+x1*x2*x3*k,:] for k in range(window_size-1)], dim=0).mean()
+    dec_in = torch.cat([src[:,x1*x2*x3:,:], dec_rollout], dim=1).float().to(device)
+    outputs = model(src, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
 
     return outputs, tgt
 
@@ -77,8 +81,9 @@ def predict_model(model, test_loader, epoch, config={},\
         config: dictionary, the config of this plot, used for saving distinguishable plots for each trail
     '''
     model.eval()
-    test_rollout = {}#torch.Tensor(0)   
-    test_result = torch.Tensor(0) 
+    window_size = config['window_size']  
+    test_result = torch.Tensor(0)
+    test_rollout = {}#torch.Tensor(0) 
     truth = torch.Tensor(0) 
     test_ts = torch.Tensor(0)
     test_coord = torch.Tensor(0)
@@ -90,23 +95,27 @@ def predict_model(model, test_loader, epoch, config={},\
     
     with torch.no_grad():
         for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
-            if test_rollout.get(tgt_coord) == None:
+            src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
+                                                            src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
+            key_val = str(tgt_coord[0,0,:])
+            if test_rollout.get(key_val) == None:
                 enc_in = src
                 dec_in = tgt
             else:
-                enc_in = test_rollout[tgt_coord][:,-tgt.shape[1]:,:] 
-                dec_in = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float()
-                dec_in = torch.cat([test_rollout[tgt_coord][:,:-x1*x2*x3,:], dec_in], dim=1).float()
-            enc_in, dec_in, tgt = enc_in.to(device), dec_in.to(device), tgt.to(device)
-            src_coord, tgt_coord, src_ts, tgt_ts = src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
+                enc_in = test_rollout[key_val][:,-tgt.shape[1]:,:].float()
+                # dec_rollout = enc_in[:,-x1*x2*x3:,:].float()
+                dec_rollout = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
+                for j in range(x1*x2*x3):
+                    dec_rollout[:,j,:] = torch.cat([tgt[:,j+x1*x2*x3*k,:] for k in range(window_size-1)], dim=0).mean()
+                dec_in = torch.cat([enc_in[:,x1*x2*x3:,:], dec_rollout], dim=1).float()
 
             output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
-            test_rollout[tgt_coord] = torch.cat([test_rollout.get(tgt_coord, tgt[:,x1*x2*x3:,:]),output[:,-x1*x2*x3:,:]], dim=1).detach().cpu()
+            test_rollout[key_val] = torch.cat([test_rollout.get(key_val, tgt[:,x1*x2*x3:,:]),output[:,-x1*x2*x3:,:]], dim=1)
             test_ts = torch.cat((test_ts, tgt_ts[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
             test_coord = torch.cat((test_coord, tgt_coord[:,-x1*x2*x3:,:].reshape(-1,3).detach().cpu()), 0)
             truth = torch.cat((truth, tgt[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
             test_result = torch.cat((test_result, output[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
-            
+
         a = torch.cat([test_ts.unsqueeze(-1), test_coord, test_result.unsqueeze(-1), truth.unsqueeze(-1)], dim=-1)
         a = a.numpy()
         a = a[np.argsort(a[:, 3])]
@@ -178,7 +187,7 @@ if __name__ == "__main__":
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
   
     best_config = {'epochs':2, 'window_size': 10, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': True,'feature_size': 192\
-                , 'num_enc_layers': 1, 'num_dec_layers': 4, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-5, 'lr_decay': 0.8, 'option': 'patch'\
+                , 'num_enc_layers': 1, 'num_dec_layers': 4, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-5, 'lr_decay': 0.9, 'option': 'patch'\
                 , 'predict_res': False, 'mask_type':'patch','decoder_only':False}
     
     window_size = best_config['window_size']
@@ -261,7 +270,7 @@ if __name__ == "__main__":
             for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
                 #print(f'i: {i}, src_coord: {src_coord}, tgt_coord: {tgt_coord}, src_ts: {src_ts}, tgt_ts: {tgt_ts}', flush=True)
                 src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
-                                                                src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
+                                                            src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
                 optimizer.zero_grad()
 
                 output, truth = process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size)
@@ -357,4 +366,3 @@ if __name__ == "__main__":
 
 ### plot value at specific positions against rollout timesteps
     pt_plot(root_dir=root_dir, final_result=final_result, nrows=3, ncols=3, grid_size = 16, pts_selection='movement')
-    
