@@ -89,7 +89,7 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
                         vertices.append(t*nx1*nx2*nx3 + i*x1*nx2*nx3 + j*x2*nx3 + k*x3)
 
         for i in vertices:
-            feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
+            feature  = np.array(data[[i + time*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
                                 for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])
             target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
                                 for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])  
@@ -495,8 +495,8 @@ def plot_demo(num_timestamps, grid_size, patch_size, img_dir):
 
 
 def pt_plot(root_dir, final_result, nrows=3, ncols=3, grid_size = 16, pts_selection='movement'):
-    truth = final_result['prediction']
-    prediction = final_result['truth']
+    prediction = final_result['prediction']
+    truth = final_result['truth']
     time = final_result['time']
     num_timesteps = len(np.unique(time))
     # number of points you want to plootted

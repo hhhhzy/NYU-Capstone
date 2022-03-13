@@ -44,7 +44,6 @@ def process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size
             dec_rollout[i,j,:] = torch.cat([tgt[i,j+x1*x2*x3*k,:] for k in range(window_size-1)], dim=0).mean()
     dec_in = torch.cat([src[:,x1*x2*x3:,:], dec_rollout], dim=1).float().to(device)
     outputs = model(src, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
-
     return outputs, tgt
 
 def evaluate(model,data_loader,criterion, patch_size, predict_res = False):
@@ -63,9 +62,10 @@ def evaluate(model,data_loader,criterion, patch_size, predict_res = False):
         for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(data_loader):
             src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                             src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-            dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
-            dec_inp = torch.cat([tgt[:,:-x1*x2*x3,:], dec_inp], dim=1).float().to(device)
-            output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
+            # dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
+            # dec_inp = torch.cat([tgt[:,:-x1*x2*x3,:], dec_inp], dim=1).float().to(device)
+            # output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
+            output = model(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts)
             total_loss += criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:]).detach().cpu().numpy()
 
     return total_loss
@@ -110,7 +110,7 @@ def predict_model(model, test_loader, epoch, config={},\
                 dec_in = torch.cat([enc_in[:,x1*x2*x3:,:], dec_rollout], dim=1).float()
 
             output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
-            test_rollout[key_val] = torch.cat([test_rollout.get(key_val, tgt[:,x1*x2*x3:,:]),output[:,-x1*x2*x3:,:]], dim=1)
+            test_rollout[key_val] = torch.cat([test_rollout.get(key_val, enc_in[:,x1*x2*x3:,:]),output[:,-x1*x2*x3:,:]], dim=1)
             test_ts = torch.cat((test_ts, tgt_ts[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
             test_coord = torch.cat((test_coord, tgt_coord[:,-x1*x2*x3:,:].reshape(-1,3).detach().cpu()), 0)
             truth = torch.cat((truth, tgt[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
   
-    best_config = {'epochs':2, 'window_size': 10, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': True,'feature_size': 192\
+    best_config = {'epochs':10, 'window_size': 10, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': True,'feature_size': 192\
                 , 'num_enc_layers': 1, 'num_dec_layers': 4, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-5, 'lr_decay': 0.9, 'option': 'patch'\
                 , 'predict_res': False, 'mask_type':'patch','decoder_only':False}
     
@@ -272,8 +272,8 @@ if __name__ == "__main__":
                 src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
                                                             src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
                 optimizer.zero_grad()
-
-                output, truth = process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size)
+                output = model(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts)
+                # output, truth = process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size)
                 loss = criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:])
                 total_loss += loss.item()
                 loss.backward()
