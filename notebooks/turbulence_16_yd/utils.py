@@ -37,6 +37,7 @@ def get_rho(data_path, predict_res = False):
     rho = np.array(rho)
     meshed_blocks = (nx1, nx2, nx3)
     timestamps = np.array(timestamps)
+    time_map_indices = {t:i for i,t in enumerate(np.unique(timestamps))}
     coords = np.array(coords)
     rho_original = rho.flatten()
 
@@ -46,9 +47,9 @@ def get_rho(data_path, predict_res = False):
         timestamps = timestamps[nx1*nx2*nx3:]
         coords = coords[nx1*nx2*nx3:]
         #rho_original = rho_original[:-nx1*nx2*nx3] ### to reconstruct truth from residuals, take the first meshblock of rho_original and add the residuals.
-        return rho_original[nx1*nx2*nx3:], rho_residual, meshed_blocks, coords, timestamps
+        return rho_original[nx1*nx2*nx3:], rho_residual, meshed_blocks, coords, timestamps, time_map_indices
     else: 
-        return rho_original, meshed_blocks, coords, timestamps
+        return rho_original, meshed_blocks, coords, timestamps, time_map_indices
     # print(f'rho shape: {rho_original.shape}, coords shape: {coords.shape}')
     # return rho_original, rho_residual, meshed_blocks, coords, timestamps
 
@@ -89,7 +90,7 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
                         vertices.append(t*nx1*nx2*nx3 + i*x1*nx2*nx3 + j*x2*nx3 + k*x3)
 
         for i in vertices:
-            feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
+            feature  = np.array(data[[i + time*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
                                 for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])
             target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
                                 for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])  
@@ -166,29 +167,40 @@ def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_propor
 
 ## Adjust __init__ to fit the inputs
 class CustomDataset(torch.utils.data.Dataset):
-    def __init__(self,x,coords,timestamp):
+    def __init__(self,x,coords,timestamp,data,grid_size,time_map_indices,window_size):
         self.x=x
         self.coords=coords
         self.timestamp=timestamp
+        self.data = data
+        self.window_size = window_size
+        self.time_map_indices = time_map_indices
+        self.grid_dim = np.prod([d for d in grid_size])
  
     def __len__(self):
         return len(self.x)
  
     def __getitem__(self,idx):
-        return((self.x[idx][0].view(-1,1), self.x[idx][1].view(-1,1)),(self.coords[idx][0], self.coords[idx][1]),(self.timestamp[idx][0].view(-1,1), self.timestamp[idx][1].view(-1,1)))
+        src_timestamp, tgt_timestamp = self.timestamp[idx][0], self.timestamp[idx][1]
+        src_coords, tgt_coords = self.coords[idx][0], self.coords[idx][1]
+        src_x, tgt_x = self.x[idx][0], self.x[idx][1]
+        prev_block_endtime_index = self.time_map_indices[src_timestamp.max().item()] #Find the largest time index in src
+        return( (src_x.view(-1,1), tgt_x.view(-1,1)),\
+                (src_coords, tgt_coords),\
+                (src_timestamp.view(-1,1), tgt_timestamp.view(-1,1)) )
+                # self.data[(prev_block_endtime_index-self.window_size)*self.grid_dim:prev_block_endtime_index*self.grid_dim] ) #return blocks before current timestep
     
 
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
                         use_coords = True, use_time = True, test_mode = False, scale = False, \
-                        window_size = 10, patch_size=(1,1,16), option='patch', predict_res=False): 
+                        window_size = 10, patch_size=(1,1,16), grid_size=(16,16,16), option='patch', predict_res=False): 
     np.random.seed(505)
     
     data_path='/scratch/yd1008/nyu-capstone/data_turb_dedt1_16'
     if predict_res:
-        data_original, data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res) 
+        data_original, data, meshed_blocks, coords, timestamps, time_map_indices = get_rho(data_path, predict_res=predict_res) 
     else:
-        data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res) 
+        data, meshed_blocks, coords, timestamps, time_map_indices = get_rho(data_path, predict_res=predict_res) 
 
 
     ###FOR SIMPLE TEST SINE AND COSINE 
@@ -244,16 +256,19 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
 
         ### Get the first block in test_original to perform rollout that gives back the original data based on predicted residuals
 
-        dataset_train_val, dataset_test = CustomDataset(train_val_data,train_val_coords,train_val_timestamps), CustomDataset(test_data,test_coords,test_timestamps)
+        dataset_train_val, dataset_test = CustomDataset(train_val_data,train_val_coords,train_val_timestamps,data,grid_size,time_map_indices,window_size)\
+                                    , CustomDataset(test_data,test_coords,test_timestamps,data,grid_size,time_map_indices,window_size)
         train_val_loader = torch.utils.data.DataLoader(dataset_train_val, batch_size=batch_size, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                         persistent_workers=True, prefetch_factor = 16)
         test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=1, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                         persistent_workers=True, prefetch_factor = 128) 
-        return train_val_loader, test_loader, scaler
+        return train_val_loader, test_loader, scaler, torch.from_numpy(data).float()
     if not test_mode:                           
-        dataset_train, dataset_test, dataset_val = CustomDataset(train_data,train_coords,train_timestamps), CustomDataset(test_data,test_coords,test_timestamps), CustomDataset(val_data,val_coords,val_timestamps)
+        dataset_train, dataset_test, dataset_val = CustomDataset(train_data,train_coords,train_timestamps,data,grid_size,time_map_indices,window_size)\
+                                                ,CustomDataset(test_data,test_coords,test_timestamps,data,grid_size,time_map_indices,window_size)\
+                                                , CustomDataset(val_data,val_coords,val_timestamps,data,grid_size,time_map_indices,window_size)
 
         train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, \
                                             drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
@@ -265,7 +280,7 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
                                             drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
        
-        return train_loader,val_loader, test_loader
+        return train_loader,val_loader, test_loader, scaler, torch.from_numpy(data).float()
 
 # img_dir = 'figs' ###dir to save images to
 # pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) ###dir of csv file, or pandas dataframe
