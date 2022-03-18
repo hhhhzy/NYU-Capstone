@@ -8,6 +8,8 @@ from einops import rearrange
 import numpy as np
 import math
 
+import time
+
 def reshape_3d(x, grid_size,):
     return x.reshape((-1,)+grid_size)
 
@@ -117,6 +119,7 @@ class conv_3d(nn.Module):
         x = x.contiguous().view((-1,)+grid_size+(self.dim,)) 
         if pad_block>0:
             x = F.pad(x,(0,0,0,0,0,0,0,0,0,pad_block)) #pad 0s for the block predicted
+            #print(f'padded x shape:{x.shape}')
         x = rearrange(x, "n d h w c -> n c d h w")
         # x = self.activation1(self.conv1(x))
         # x = self.activation2(self.conv2(x))
@@ -178,11 +181,13 @@ class Transformer(nn.Module):
         super(Transformer, self).__init__()
 
         self.all_data = all_data
+        self.feature_size = feature_size
         self.patch_size = patch_size
         self.patch_length = np.prod(patch_size)
         self.window_size = window_size
         self.pred_size = pred_size
         self.grid_size = grid_size
+        self.grid_dim = np.prod(grid_size)
         self.decoder_only = decoder_only
 
         self.pe_type = pe_type
@@ -193,7 +198,6 @@ class Transformer(nn.Module):
         self.temporal_encoder = TemporalEmbedding(input_dim=feature_size, output_dim=feature_size, activation='sin')
 
         self.conv_embedding = conv_3d(1,feature_size, kernel_size = 7, padding = 3, padding_mode = 'circular') ### 7 a good number?
-        self.conv_embedded = self.conv_embedding(all_data,grid_size)
 
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=feature_size, \
             nhead=num_head, dropout=dropout, dim_feedforward = d_ff)
@@ -212,7 +216,7 @@ class Transformer(nn.Module):
         self.decoder.bias.data.zero_()
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices):
+    def forward(self, src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices, block):
         ###CONV EMBEDDING
         B,N,_ = src.shape
         device = src.device
@@ -220,11 +224,27 @@ class Transformer(nn.Module):
         ### CONV EMBEDDING
         #conv_embedded_blocks = self.conv_embedding(prev_blocks, self.grid_size, self.pred_size)
         #conv_embedded = self.conv_embedding(self.all_data.to(device), self.grid_size)
-        conv_embedded = self.conv_embedded.clone()
-        src_conv_embedding = self.block_time_coord_indexing(src_ts, src_coord, time_map_indices, conv_embedded, device)
-        tgt_conv_embedding = self.block_time_coord_indexing(tgt_ts, tgt_coord, time_map_indices, conv_embedded, device)
-        src = src + src_conv_embedding.to(device)
-        tgt = tgt + tgt_conv_embedding.to(device)
+        src_conv_stack = []
+        tgt_conv_stack = []
+        start_time = time.time() #######
+        for i in range(B):
+            single_patch_src_stack = []
+            single_patch_tgt_stack = []
+            for w in range(self.window_size):
+                src_coord_window = src_coord[i][w*self.patch_length:(w+1)*self.patch_length] 
+                current_window = block[0][w*self.grid_dim:(w+1)*self.grid_dim]
+                conv_embedded = self.conv_embedding(current_window,self.grid_size) #1xDxHxWxC
+                src_conv_embedding = self.block_time_coord_indexing(None, src_coord_window, time_map_indices, conv_embedded, device)
+                single_patch_src_stack.append(src_conv_embedding)
+                # conv_embedded = self.conv_embedding(block[0],self.grid_size,1)        
+                # src_conv_embedding = self.block_time_coord_indexing(src_ts[i], src_coord[i], time_map_indices, conv_embedded, device)
+                # tgt_conv_embedding = self.block_time_coord_indexing(tgt_ts[i], tgt_coord[i], time_map_indices, conv_embedded, device, self.pred_size)
+            stacked_patch_src = torch.cat(single_patch_src_stack,dim=0).to(device)
+            src_conv_stack.append(stacked_patch_src.to(device))
+            single_patch_tgt_stack = torch.cat([stacked_patch_src[:-self.patch_length*self.pred_size], torch.zeros([self.patch_length*self.pred_size, self.feature_size]).to(device)], dim=0)
+            tgt_conv_stack.append(single_patch_tgt_stack)
+        src = src + torch.stack(src_conv_stack, dim = 0)
+        tgt = tgt + torch.stack(tgt_conv_stack, dim = 0)
 
         if self.pe_type == '1d':
             src = src.permute(1,0,2)
@@ -243,7 +263,6 @@ class Transformer(nn.Module):
             tgt = tgt + self.pos3d_encoder(tgt_coord) + self.temporal_encoder(tgt_ts)
             src = src.permute(1,0,2)
             tgt = tgt.permute(1,0,2)
-
         #print(f'src shape {src.shape}, tgt shape: {tgt.shape}')
         ### generate patch mask
         if self.src_mask == 'patch':
@@ -251,12 +270,12 @@ class Transformer(nn.Module):
             self.dec_src_mask = self._generate_patch_mask(self.patch_size,self.window_size,-1).to(device)
             #print(f'Using patch mask: mask: {self.mask}, shape: {self.mask.shape}', flush=True)
             #self.src_mask = mask
-
         elif self.src_mask is None or self.src_mask.size(0) != len(src):
             device = src.device
             self.mask = self._generate_square_subsequent_mask(src.shape[0]).to(device)
             #print(f'Using original mask: mask: {self.mask}, shape: {self.mask.shape}', flush=True)
             #self.src_mask = mask
+
         # print('PE out shape: ',self.pos_encoder(src).shape)
         # print('PE out shape: ',self.pos_encoder(src).shape)
         # src = self.pos_encoder(src)
@@ -271,7 +290,7 @@ class Transformer(nn.Module):
             #print(f'encoder output shape: {output_enc.shape}', flush=True)
             output_dec = self.transformer_decoder(tgt,output_enc,self.mask, self.dec_src_mask)
             #print(f'decoder output shape: {output_dec.shape}', flush=True)
-
+        print(f'dec finish: {time.time()-start_time}', flush=True)
         output = self.decoder(output_dec)
 
         #print('output shape: ',output.shape)
@@ -280,13 +299,12 @@ class Transformer(nn.Module):
     # def generate_cov3d_embedding(self, data):
     #     return self.conv_embedding(data, self.grid_size)
 
-    def block_time_coord_indexing(self, timestamp, coords, time_map_indices, conv_embedded_blocks, device):
-        conv_embedded_blocks = conv_embedded_blocks.clone()
-        time_indices = torch.from_numpy(np.vectorize(time_map_indices.get)(timestamp.detach().cpu()))
-        #time_indices = torch.repeat_interleave(torch.arange(self.window_size),self.patch_length).unsqueeze(-1)
-        time_coord_indices = torch.cat([time_indices.to(device),coords],dim=2)
+    def block_time_coord_indexing(self, timestamp, coords, time_map_indices, conv_embedded_blocks, device, shift_size=0):
+        #time_indices = torch.repeat_interleave(torch.arange(shift_size,self.window_size+shift_size),self.patch_length).unsqueeze(-1)
+        time_indices = torch.repeat_interleave(torch.zeros(1),self.patch_length).unsqueeze(-1)
+        time_coord_indices = torch.cat([time_indices.to(device),coords],dim=1)
         time_coord_indices = time_coord_indices.long()
-        return conv_embedded_blocks[time_coord_indices.transpose(1,2).chunk(chunks=4, dim=1)].squeeze(1) #get corresponding conv embeddings on timestamp and coords, 4 for 4 dimensional indices
+        return conv_embedded_blocks[time_coord_indices.transpose(0,1).chunk(chunks=4, dim=0)].squeeze(0) #shape NxC get corresponding conv embeddings on timestamp and coords, 4 for 4 dimensional indices
 
     def _generate_square_subsequent_mask(self, sz):
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
