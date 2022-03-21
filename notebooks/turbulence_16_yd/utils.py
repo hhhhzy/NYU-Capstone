@@ -186,8 +186,8 @@ class CustomDataset(torch.utils.data.Dataset):
         prev_block_endtime_index = self.time_map_indices[src_timestamp.max().item()] #Find the largest time index in src
         return( (src_x.view(-1,1), tgt_x.view(-1,1)),\
                 (src_coords, tgt_coords),\
-                (src_timestamp.view(-1,1), tgt_timestamp.view(-1,1)) )
-                # self.data[(prev_block_endtime_index-self.window_size)*self.grid_dim:prev_block_endtime_index*self.grid_dim] ) #return blocks before current timestep
+                (src_timestamp.view(-1,1), tgt_timestamp.view(-1,1)),
+                self.data[(prev_block_endtime_index-self.window_size+1)*self.grid_dim:(prev_block_endtime_index+1)*self.grid_dim] ) #return blocks before current timestep
     
 
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
@@ -261,9 +261,9 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         train_val_loader = torch.utils.data.DataLoader(dataset_train_val, batch_size=batch_size, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                         persistent_workers=True, prefetch_factor = 16)
-        test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=1, \
+        test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
-                                        persistent_workers=True, prefetch_factor = 128) 
+                                        persistent_workers=True, prefetch_factor = 16) 
         return train_val_loader, test_loader, scaler, torch.from_numpy(data).float()
     if not test_mode:                           
         dataset_train, dataset_test, dataset_val = CustomDataset(train_data,train_coords,train_timestamps,data,grid_size,time_map_indices,window_size)\
@@ -345,7 +345,7 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
 
     ### create a dict to save all values
     result_dict = {}
-    print('Processing dataframe...')
+    print('Processing dataframe...', flush=True)
     for timestamp in timestamps:
         single_simulation_df = preds_all.loc[(preds_all[time_colname]==timestamp)]
         if single_simulation_df.shape[0]>=predictions_per_simulation:
@@ -365,7 +365,7 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         else:
             print(f'Found {single_simulation_df.shape[0]} predictions in simulation at timestamp {timestamp}, but expect {predictions_per_simulation}')
 
-    print('Generating plots...')
+    print('Generating plots...', flush=True)
     ### plot for each timestamp        
     for ts_idx,ts in enumerate(list(result_dict.keys())):
         fig,axes = plt.subplots(nrows = slice_axis_shape, ncols = 3, figsize=(40, 40),subplot_kw={'xticks': [], 'yticks': []})

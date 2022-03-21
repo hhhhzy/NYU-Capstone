@@ -1,15 +1,17 @@
 #!/bin/bash python
 import torch 
+import torch.nn.functional as F
 from torch.utils import tensorboard
 import torch.optim as optim
 import pandas as pd
 import numpy as np
+from einops import reduce
 from sklearn.metrics import mean_absolute_error, mean_squared_error, explained_variance_score, r2_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import time
 import os
-from transformer_test import Transformer
+from transformer import Transformer, block_to_patch, patch_to_block
 from utils import *
 
 class early_stopping():
@@ -43,7 +45,7 @@ def process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size
 
     return outputs, tgt
 
-def evaluate(model,data_loader,criterion, patch_size, predict_res = False):
+def evaluate(model,data_loader,criterion, patch_size, predict_res = False, time_map_indices = None):
     model.eval()    
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
@@ -56,18 +58,21 @@ def evaluate(model,data_loader,criterion, patch_size, predict_res = False):
         if torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
     with torch.no_grad():        
-        for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(data_loader):
-            src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
-                                                            src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-            dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
-            dec_inp = torch.cat([tgt[:,:-x1*x2*x3,:], dec_inp], dim=1).float().to(device)
-            output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
+        for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts), src_block) in enumerate(data_loader):
+            src_block = src_block[0]
+            src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, src_block = src.to(device), tgt.to(device), src_coord.to(device),\
+                                                            tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device), src_block.to(device)
+            # dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
+            # dec_inp = torch.cat([tgt[:,:-x1*x2*x3,:], dec_inp], dim=1).float().to(device)
+            # output = model(src, dec_inp, src_coord, tgt_coord, src_ts, tgt_ts)
+            output = model(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices, src_block)
+
             total_loss += criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:]).detach().cpu().numpy()
 
     return total_loss
 
 def predict_model(model, test_loader, epoch, config={},\
-                    plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = False):
+                    plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = False, time_map_indices = None):
     '''
     Note: 
         Don't forget to create a subfolder 'final_plot' under 'figs'
@@ -77,6 +82,9 @@ def predict_model(model, test_loader, epoch, config={},\
         config: dictionary, the config of this plot, used for saving distinguishable plots for each trail
     '''
     model.eval()
+    window_size = config['window_size']
+    patch_size = config['patch_size']
+    patch_length = np.prod(config['patch_size'])
     test_rollout = {}#torch.Tensor(0)   
     test_result = torch.Tensor(0) 
     truth = torch.Tensor(0) 
@@ -89,23 +97,31 @@ def predict_model(model, test_loader, epoch, config={},\
             model = nn.DataParallel(model)
     
     with torch.no_grad():
-        for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
-            if test_rollout.get(tgt_coord) == None:
+        for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts),src_block) in enumerate(test_loader):
+            src_block = src_block[0]
+            src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), src_coord.to(device),\
+                                                                            tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
+            if i==0:
+                B, N, C = src.shape
                 enc_in = src
-                dec_in = tgt
+                test_rollout = src
+                src_block = src_block.to(device)
             else:
-                enc_in = test_rollout[tgt_coord][:,-tgt.shape[1]:,:] 
-                dec_in = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float()
-                dec_in = torch.cat([test_rollout[tgt_coord][:,:-x1*x2*x3,:], dec_in], dim=1).float()
-            enc_in, dec_in, tgt = enc_in.to(device), dec_in.to(device), tgt.to(device)
-            src_coord, tgt_coord, src_ts, tgt_ts = src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
+                enc_in = test_rollout[:,-N:,:]
+                src_block = patch_to_block(enc_in, window_size, patch_size, (grid_size,)*3).to(device)
 
-            output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
-            test_rollout[tgt_coord] = torch.cat([test_rollout.get(tgt_coord, tgt[:,x1*x2*x3:,:]),output[:,-x1*x2*x3:,:]], dim=1).detach().cpu()
-            test_ts = torch.cat((test_ts, tgt_ts[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
-            test_coord = torch.cat((test_coord, tgt_coord[:,-x1*x2*x3:,:].reshape(-1,3).detach().cpu()), 0)
-            truth = torch.cat((truth, tgt[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
-            test_result = torch.cat((test_result, output[:,-x1*x2*x3:,:].flatten().detach().cpu()), 0)
+            print(f'Iteration: {i}, \n src_block: {src_block.squeeze(-1)}, \n shape: {src_block.shape}') #40960 / 10 16 16 16 1 / 
+
+            dec_rollout = reduce(enc_in.view(B,window_size,patch_length,-1), 'b n p c -> b p c', 'mean')
+            dec_in = torch.cat([enc_in[:,patch_length:,:], dec_rollout], dim=1).float()
+
+            output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices, src_block)
+            print(f'Iteration: {i}, \n output: {output[:,-patch_length:,:].squeeze(-1)}, \n shape: {output[:,-patch_length:,:].shape}') #64 64 1 / 64 64 1/
+            test_rollout = torch.cat([test_rollout,output[:,-patch_length:,:]], dim=1)
+            test_ts = torch.cat((test_ts, tgt_ts[:,-patch_length:,:].flatten().detach().cpu()), 0)
+            test_coord = torch.cat((test_coord, tgt_coord[:,-patch_length:,:].reshape(-1,3).detach().cpu()), 0)
+            truth = torch.cat((truth, tgt[:,-patch_length:,:].flatten().detach().cpu()), 0)
+            test_result = torch.cat((test_result, output[:,-patch_length:,:].flatten().detach().cpu()), 0)
             
         a = torch.cat([test_ts.unsqueeze(-1), test_coord, test_result.unsqueeze(-1), truth.unsqueeze(-1)], dim=-1)
         a = a.numpy()
@@ -117,29 +133,29 @@ def predict_model(model, test_loader, epoch, config={},\
             final_result = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'prediction': scaler.inverse_transform(a[:,4]), 'truth':scaler.inverse_transform(a[:,5])}
         elif config['scale']==False:
             final_result = {'time': a[:,0], 'x1': a[:,1], 'x2': a[:,2], 'x3': a[:,3], 'prediction': a[:,4], 'truth':a[:,5]}
-        if predict_res:
-            residuals = pd.DataFrame.from_dict(final_result)
-            truth = pd.read_csv('tune_results/data_original.csv',index_col=0)
-            ### Group by time since last timestamp is duplicated
-            truth.time = np.round(truth.time.values,5)
-            residuals.time = np.round(residuals.time.values,5)
-            residuals = residuals.groupby(['time','x1','x2','x3']).mean().reset_index()
-            truth = truth.groupby(['time','x1','x2','x3']).mean().reset_index()
-            ### Reconstruct predictions, truth is also reconstructed to validate answer
-            pred_timestamps = residuals.time.unique()
-            pred_start_time = residuals.time[0]
-            pred_start_truth = truth[truth['time']==truth.time.unique()[-len(pred_timestamps)]]
-            for i,(t1,t2) in enumerate(zip(pred_timestamps,truth.time.unique()[-len(pred_timestamps):])):
-                truth_values = truth.loc[truth['time']==t2].truth_original.values
-                pred_values = residuals.loc[residuals['time']==t1].prediction.values
-                truth_check_values = residuals.loc[residuals['time']==t1].truth.values
-                if i==0:
-                    prev_truth_plus_residual = pred_values+truth_values
-                else:
-                    prev_truth_plus_residual = pred_values+prev_truth_plus_residual
-                residuals.loc[residuals['time']==t1,'prediction']= prev_truth_plus_residual
-                residuals.loc[residuals['time']==t1,'truth'] = truth_check_values+truth_values
-            final_result = residuals
+        # if predict_res:
+        #     residuals = pd.DataFrame.from_dict(final_result)
+        #     truth = pd.read_csv('tune_results/data_original.csv',index_col=0)
+        #     ### Group by time since last timestamp is duplicated
+        #     truth.time = np.round(truth.time.values,5)
+        #     residuals.time = np.round(residuals.time.values,5)
+        #     residuals = residuals.groupby(['time','x1','x2','x3']).mean().reset_index()
+        #     truth = truth.groupby(['time','x1','x2','x3']).mean().reset_index()
+        #     ### Reconstruct predictions, truth is also reconstructed to validate answer
+        #     pred_timestamps = residuals.time.unique()
+        #     pred_start_time = residuals.time[0]
+        #     pred_start_truth = truth[truth['time']==truth.time.unique()[-len(pred_timestamps)]]
+        #     for i,(t1,t2) in enumerate(zip(pred_timestamps,truth.time.unique()[-len(pred_timestamps):])):
+        #         truth_values = truth.loc[truth['time']==t2].truth_original.values
+        #         pred_values = residuals.loc[residuals['time']==t1].prediction.values
+        #         truth_check_values = residuals.loc[residuals['time']==t1].truth.values
+        #         if i==0:
+        #             prev_truth_plus_residual = pred_values+truth_values
+        #         else:
+        #             prev_truth_plus_residual = pred_values+prev_truth_plus_residual
+        #         residuals.loc[residuals['time']==t1,'prediction']= prev_truth_plus_residual
+        #         residuals.loc[residuals['time']==t1,'truth'] = truth_check_values+truth_values
+        #     final_result = residuals
 
     if plot==True:
         # plot a part of the result
@@ -169,14 +185,16 @@ def predict_model(model, test_loader, epoch, config={},\
 
 if __name__ == "__main__":
     print(f'Pytorch version {torch.__version__}')
-    root_dir = '/scratch/yd1008/nyu-capstone/notebooks/turbulence_16_yd/tune_results/'
+    root_dir = '/scratch/yd1008/nyu_capstone_2/notebooks/turbulence_16_yd/tune_results/'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
+
+    
   
-    best_config = {'epochs':2, 'window_size': 4, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': False,'feature_size': 480\
-                , 'num_enc_layers': 1, 'num_dec_layers': 4, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-6, 'lr_decay': 0.8, 'option': 'patch'\
-                , 'predict_res': True, 'mask_type':'patch','decoder_only':True}
+    best_config = {'epochs':20, 'window_size': 10, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 64, 'scale': True,'feature_size': 144\
+                , 'num_enc_layers': 2, 'num_dec_layers': 4, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-5, 'lr_decay': 0.9, 'option': 'patch'\
+                , 'predict_res': False, 'mask_type':'patch','decoder_only':False}
     
     window_size = best_config['window_size']
     patch_size = best_config['patch_size']
@@ -200,6 +218,7 @@ if __name__ == "__main__":
     train_proportion = 0.6
     test_proportion = 0.2
     val_proportion = 0.2
+    pred_size = 1
     grid_size = 16
     
     skip_training = False
@@ -209,15 +228,21 @@ if __name__ == "__main__":
     print(best_config, flush=True)
     print('-'*50, flush=True)
 
-    model = Transformer(feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
-        d_ff = d_ff, dropout=dropout,num_head=num_head,pe_type=pe_type,grid_size=grid_size,mask_type=mask_type,patch_size=patch_size,window_size=window_size,decoder_only=decoder_only)
+    ### SPECIFYING use_coords=True WILL RETURN DATALOADERS FOR COORDS
+    train_loader, test_loader, scaler, data = get_data_loaders(train_proportion, test_proportion, val_proportion,\
+        pred_size = pred_size, batch_size = batch_size, num_workers = 2, pin_memory = False, use_coords = True, use_time = True,\
+        test_mode = True, scale = scale, window_size = window_size, patch_size = patch_size, option = option, predict_res = predict_res)
+    
+    model = Transformer(data, feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
+        d_ff = d_ff, dropout=dropout,num_head=num_head,pe_type=pe_type,grid_size=(grid_size,)*3,mask_type=mask_type,\
+        patch_size=patch_size,window_size=window_size,pred_size=pred_size,decoder_only=decoder_only)
 
 
     device = "cpu"
     if torch.cuda.is_available():
-        device = "cuda:0"
+        device = "cuda"
         if torch.cuda.device_count() > 1:
-            model = nn.parallel.DistributedDataParallel(model)
+            model = nn.DataParallel(model)
     print('Using device: ',device)
     model.to(device)
       
@@ -225,18 +250,10 @@ if __name__ == "__main__":
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=lr_decay)
     #writer = tensorboard.SummaryWriter('/scratch/yd1008/tensorboard_output/')
-    
-    # if checkpoint_dir:
-    #     checkpoint = os.path.join(checkpoint_dir, "checkpoint")
-    #     model_state, optimizer_state = torch.load(checkpoint)
-    #     model.load_state_dict(model_state)
-    #     optimizer.load_state_dict(optimizer_state)
-    
-    ### SPECIFYING use_coords=True WILL RETURN DATALOADERS FOR COORDS
-    train_loader, test_loader, scaler = get_data_loaders(train_proportion, test_proportion, val_proportion,\
-        pred_size = 1, batch_size = batch_size, num_workers = 2, pin_memory = False, use_coords = True, use_time = True,\
-        test_mode = True, scale = scale, window_size = window_size, patch_size = patch_size, option = option, predict_res = True)
-    
+
+    time_map_indices = train_loader.dataset.time_map_indices
+    print(f'DEBUG: time_map_indices: {time_map_indices}')
+
     epochs = best_config['epochs']
     train_losses = []
     test_losses = []
@@ -255,20 +272,19 @@ if __name__ == "__main__":
             total_loss = 0.
             start_time = time.time()
 
-            for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
-                #print(f'i: {i}, src_coord: {src_coord}, tgt_coord: {tgt_coord}, src_ts: {src_ts}, tgt_ts: {tgt_ts}', flush=True)
-                src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), \
-                                                                src_coord.to(device), tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
+            for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts), src_block) in enumerate(train_loader):
+                src_block = src_block[0]
+                src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, src_block = src.to(device), tgt.to(device), src_coord.to(device),\
+                                                                            tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device), src_block.to(device)
                 optimizer.zero_grad()
-
-                output, truth = process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size)
+                output = model(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices, src_block)
                 loss = criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:])
                 total_loss += loss.item()
                 loss.backward()
                 optimizer.step()
 
             avg_train_loss = total_loss*batch_size/len(train_loader.dataset)
-            total_test_loss = evaluate(model, test_loader, criterion, patch_size=patch_size, predict_res = predict_res)
+            total_test_loss = evaluate(model, test_loader, criterion, patch_size=patch_size, predict_res = predict_res, time_map_indices = time_map_indices)
             avg_test_loss = total_test_loss/len(test_loader.dataset)
 
             
@@ -284,11 +300,9 @@ if __name__ == "__main__":
             if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
                 predict_model(model, test_loader, epoch, config=best_config,\
-                                    plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = predict_res)   
+                                    plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = predict_res, time_map_indices = time_map_indices)   
 
-            #writer.add_scalar('train_loss',avg_train_loss,epoch)
-            #writer.add_scalar('test_loss',avg_test_loss,epoch)
-            
+
             Early_Stopping(model, avg_test_loss)
 
             counter_new = Early_Stopping.counter
@@ -319,7 +333,7 @@ if __name__ == "__main__":
 ### Predict
     start_time = time.time()
     final_result = predict_model(model, test_loader,  epoch, config=best_config,\
-                                            plot=True, plot_range=[0,1], final_prediction=True, predict_res = predict_res)
+                                            plot=True, plot_range=[0,1], final_prediction=True, predict_res = predict_res, time_map_indices = time_map_indices)
     prediction = final_result['prediction']
     print('-'*20 + ' Measure for Simulation Speed ' + '-'*20)
     print(f'Time to forcast {len(prediction)} samples: {time.time()-start_time} s' )

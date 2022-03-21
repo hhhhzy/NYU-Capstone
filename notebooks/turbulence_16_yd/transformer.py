@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from functools import reduce, lru_cache
 from operator import mul
-from einops import rearrange
+from einops import rearrange, reduce as Reduce
 import numpy as np
 import math
 
@@ -22,6 +22,34 @@ def roll_block(x, shift_size, reverse=False):
         shift_size = [-s for s in list(shift_size)]
     return torch.roll(x, shifts=(-shift_size[0], -shift_size[1], -shift_size[2], -shift_size[3]), dims=(0,1,2,3))
 
+def block_to_patch(x, patch_size, pad_size=1, stride_size = None):
+    '''
+    x: (N,H,D,W,C) input data
+    return:
+        patched_data: (num_patch_x1 x num_patch_x2 x num_patch_x3, window_size x patch_size_1 x patch_size_2 x patch_size_3, num_channel)
+    '''
+    N, _, _, _, _ = x.shape
+    stride_size = stride_size or patch_size
+    p1, p2, p3 = patch_size
+    s1, s2, s3 = stride_size
+    if pad_size>0:
+        x_padded = torch.cat([x,Reduce(x,'n g1 g2 g3 c -> g1 g2 g3 c', 'mean').unsqueeze(0)],dim=0) # mean padding only pad size 1 is implemented
+        # x_padded = F.pad(x,(0,0,0,0,0,0,0,0,0,pad_size))
+    x_padded = x_padded.unfold(0,N,pad_size).unfold(1,p1,s1).unfold(2,p2,s2).unfold(3,p3,s3)
+    src, tgt = rearrange(x_padded, 'nb n1 n2 n3 c b p1 p2 p3 -> nb (n1 n2 n3) (b p1 p2 p3) c')
+    return src, tgt
+
+def patch_to_block(x, window_size, patch_size, grid_size):
+    '''
+    Inverse of block_to_patch, refer to block_to_patch documentation
+    '''
+    _, _, c = x.shape
+    p1, p2, p3 = patch_size
+    g1, g2, g3 = grid_size
+    n1, n2, n3 = g1//p1, g2//p2, g3//p3
+    rearranged = rearrange(x, '(n1 n2 n3) (b p1 p2 p3) c -> b n1 n2 n3 c p1 p2 p3', \
+                       p1=p1, p2=p2, p3=p3, b=window_size, n1=n1, n2=n2, n3=n3)
+    return rearranged.permute(0,1,5,2,6,3,7,4).reshape(window_size,g1,g2,g3,c)  
 
 class PositionalEncoding(nn.Module):
 
@@ -97,7 +125,7 @@ class PositionalEmbedding3D(nn.Module):
         return self.pe[xs,ys,zs].view(batch.shape[0],-1,self.d_model_)  #torch.stack([self.pe[i,j,k] for i,j,k in zip(xs,ys,zs)]).view(batch.shape[0],-1,self.d_model_)
 
 class conv_3d(nn.Module):
-    def __init__(self, dim, dim_out, kernel_size = 5, stride = 1, padding = 2, dilation = 1, padding_mode = 'zeros'):
+    def __init__(self, dim, dim_out, kernel_size = 5, stride = 1, padding = 2, dilation = 1, padding_mode = 'circular'):
         super().__init__()
         self.dim = dim
         self.conv = nn.Sequential(
@@ -117,13 +145,10 @@ class conv_3d(nn.Module):
         x: flattened input 
         '''
         x = x.contiguous().view((-1,)+grid_size+(self.dim,)) 
-        if pad_block>0:
-            x = F.pad(x,(0,0,0,0,0,0,0,0,0,pad_block)) #pad 0s for the block predicted
-            #print(f'padded x shape:{x.shape}')
+        # if pad_block>0:
+        #     x = torch.cat([x,Reduce(x,'n g1 g2 g3 c -> g1 g2 g3 c', 'mean')],dim=0) ### mean padding the predicted block
+        #     #x = F.pad(x,(0,0,0,0,0,0,0,0,0,pad_block)) #pad 0s for the block predicted
         x = rearrange(x, "n d h w c -> n c d h w")
-        # x = self.activation1(self.conv1(x))
-        # x = self.activation2(self.conv2(x))
-        # x = self.conv3(x)
         x_conv = self.conv(x)
         if return_flattened:
             x_conv = rearrange(x_conv, "n c d h w -> (n d h w) c")
@@ -197,7 +222,7 @@ class Transformer(nn.Module):
         #self.token_embedding = TokenEmbedding(feature_size)
         self.temporal_encoder = TemporalEmbedding(input_dim=feature_size, output_dim=feature_size, activation='sin')
 
-        self.conv_embedding = conv_3d(1,feature_size, kernel_size = 7, padding = 3, padding_mode = 'circular') ### 7 a good number?
+        self.conv_embedding = conv_3d(1,feature_size, kernel_size = 7, padding = 3, padding_mode = 'reflect') ### 5 a good number?
 
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=feature_size, \
             nhead=num_head, dropout=dropout, dim_feedforward = d_ff)
@@ -222,29 +247,11 @@ class Transformer(nn.Module):
         device = src.device
         
         ### CONV EMBEDDING
-        #conv_embedded_blocks = self.conv_embedding(prev_blocks, self.grid_size, self.pred_size)
-        #conv_embedded = self.conv_embedding(self.all_data.to(device), self.grid_size)
-        src_conv_stack = []
-        tgt_conv_stack = []
-        start_time = time.time() #######
-        for i in range(B):
-            single_patch_src_stack = []
-            single_patch_tgt_stack = []
-            for w in range(self.window_size):
-                src_coord_window = src_coord[i][w*self.patch_length:(w+1)*self.patch_length] 
-                current_window = block[0][w*self.grid_dim:(w+1)*self.grid_dim]
-                conv_embedded = self.conv_embedding(current_window,self.grid_size) #1xDxHxWxC
-                src_conv_embedding = self.block_time_coord_indexing(None, src_coord_window, time_map_indices, conv_embedded, device)
-                single_patch_src_stack.append(src_conv_embedding)
-                # conv_embedded = self.conv_embedding(block[0],self.grid_size,1)        
-                # src_conv_embedding = self.block_time_coord_indexing(src_ts[i], src_coord[i], time_map_indices, conv_embedded, device)
-                # tgt_conv_embedding = self.block_time_coord_indexing(tgt_ts[i], tgt_coord[i], time_map_indices, conv_embedded, device, self.pred_size)
-            stacked_patch_src = torch.cat(single_patch_src_stack,dim=0).to(device)
-            src_conv_stack.append(stacked_patch_src.to(device))
-            single_patch_tgt_stack = torch.cat([stacked_patch_src[:-self.patch_length*self.pred_size], torch.zeros([self.patch_length*self.pred_size, self.feature_size]).to(device)], dim=0)
-            tgt_conv_stack.append(single_patch_tgt_stack)
-        src = src + torch.stack(src_conv_stack, dim = 0)
-        tgt = tgt + torch.stack(tgt_conv_stack, dim = 0)
+        conv_embedded = self.conv_embedding(block,self.grid_size)
+        src_conv, tgt_conv = block_to_patch(conv_embedded, self.patch_size, pad_size=1)
+        src = src + src_conv
+        tgt = tgt + tgt_conv
+
 
         if self.pe_type == '1d':
             src = src.permute(1,0,2)
@@ -290,7 +297,6 @@ class Transformer(nn.Module):
             #print(f'encoder output shape: {output_enc.shape}', flush=True)
             output_dec = self.transformer_decoder(tgt,output_enc,self.mask, self.dec_src_mask)
             #print(f'decoder output shape: {output_dec.shape}', flush=True)
-        print(f'dec finish: {time.time()-start_time}', flush=True)
         output = self.decoder(output_dec)
 
         #print('output shape: ',output.shape)
