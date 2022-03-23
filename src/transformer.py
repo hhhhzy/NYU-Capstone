@@ -118,12 +118,12 @@ class TemporalEmbedding(nn.Module):
         x = self.fc1(x)
         return x
 
-class Tranformer(nn.Module):
+class Transformer(nn.Module):
     def __init__(self,feature_size=250,num_enc_layers=1,num_dec_layers=1,d_ff = 256, dropout=0.1,num_head=2,pe_type='3d',grid_size=16,mask_type=None,patch_size=(2,2,2),window_size=5,decoder_only=False):
         '''
         mask_type: 'patch' if using cuboic patches, which masks by patch instead of elements. Default to None (square_subsequent mask)
         '''
-        super(Tranformer, self).__init__()
+        super(Transformer, self).__init__()
         self.patch_size = patch_size
         self.window_size = window_size
         self.decoder_only = decoder_only
@@ -176,15 +176,16 @@ class Tranformer(nn.Module):
         ### generate patch mask
         if self.src_mask == 'patch':
             device = src.device
-            mask = self._generate_patch_mask(self.patch_size,self.window_size).to(device)
-            print(f'Using patch mask: mask: {mask}, shape: {mask.shape}', flush=True)
-            self.src_mask = mask
-
+            self.mask = self._generate_patch_mask(self.patch_size,self.window_size,0).to(device)
+            self.dec_src_mask = self._generate_patch_mask(self.patch_size,self.window_size,-1).to(device)
+            #print(f'Using patch mask: mask: {self.mask}, shape: {self.mask.shape}', flush=True)
+            #self.src_mask = mask
         elif self.src_mask is None or self.src_mask.size(0) != len(src):
             device = src.device
-            mask = self._generate_square_subsequent_mask(src.shape[0]).to(device)
-            print(f'Using original mask: mask: {mask}, shape: {mask.shape}', flush=True)
-            self.src_mask = mask
+            self.mask = self._generate_square_subsequent_mask(src.shape[0]).to(device)
+            #print(f'Using original mask: mask: {self.mask}, shape: {self.mask.shape}', flush=True)
+            #self.src_mask = mask
+
         # print('PE out shape: ',self.pos_encoder(src).shape)
         # print('PE out shape: ',self.pos_encoder(src).shape)
         # src = self.pos_encoder(src)
@@ -193,13 +194,12 @@ class Tranformer(nn.Module):
         if self.decoder_only:
             #print('USING DECODER ONLY')
             #print(f'after pe src shape {src.shape}, tgt shape: {tgt.shape}', flush=True) #(sequence, batch_size, feature_size)
-            output_dec = self.transformer_decoder(tgt,src,self.src_mask)
+            output_dec = self.transformer_decoder(tgt,src,self.mask,self.dec_src_mask)
         else:
-            output_enc = self.transformer_encoder(src) 
+            output_enc = self.transformer_encoder(src,self.mask) 
             #print(f'encoder output shape: {output_enc.shape}', flush=True)
-            output_dec = self.transformer_decoder(tgt,output_enc,self.src_mask)
+            output_dec = self.transformer_decoder(tgt,output_enc,self.mask, self.dec_src_mask)
             #print(f'decoder output shape: {output_dec.shape}', flush=True)
-
         output = self.decoder(output_dec)
 
         #print('output shape: ',output.shape)
@@ -210,9 +210,9 @@ class Tranformer(nn.Module):
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask
 
-    def _generate_patch_mask(self,patch_size,window_size):
+    def _generate_patch_mask(self,patch_size,window_size,shift=0):
         patch_prod = torch.prod(torch.tensor(patch_size))
-        mask = (torch.triu(torch.ones(window_size, window_size)) == 1).transpose(0, 1)
+        mask = (torch.triu(torch.ones(window_size, window_size),shift) == 1).transpose(0, 1)
         mask = torch.repeat_interleave(mask, patch_prod, dim=0)
         mask = torch.repeat_interleave(mask, patch_prod, dim=1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))

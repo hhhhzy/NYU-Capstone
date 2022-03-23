@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import time
 import os
-from transformer import Tranformer
+from transformer import Transformer
 from utils import *
 
 class early_stopping():
@@ -106,7 +106,7 @@ def predict_model(model, test_loader, epoch, config={},\
                 # dec_rollout = enc_in[:,-x1*x2*x3:,:].float()
                 dec_rollout = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
                 for j in range(x1*x2*x3):
-                    dec_rollout[:,j,:] = torch.cat([tgt[:,j+x1*x2*x3*k,:] for k in range(window_size-1)], dim=0).mean()
+                    dec_rollout[:,j,:] = torch.cat([enc_in[:,j+x1*x2*x3*k,:] for k in range(1, window_size)], dim=0).mean()
                 dec_in = torch.cat([enc_in[:,x1*x2*x3:,:], dec_rollout], dim=1).float()
 
             output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts)
@@ -182,46 +182,56 @@ def predict_model(model, test_loader, epoch, config={},\
 if __name__ == "__main__":
     print(f'Pytorch version {torch.__version__}')
     root_dir = '/scratch/zh2095/nyu-capstone/yd_test/tune_results/'
+    csv_path = '/scratch/zh2095/nyu-capstone/data/rho_original_16.csv'
+
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
   
-    best_config = {'epochs':10, 'window_size': 10, 'patch_size': (4,4,4), 'pe_type': '3d_temporal', 'batch_size': 16, 'scale': True,'feature_size': 192\
-                , 'num_enc_layers': 1, 'num_dec_layers': 4, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-5, 'lr_decay': 0.9, 'option': 'patch'\
-                , 'predict_res': False, 'mask_type':'patch','decoder_only':False}
+    model_config = {'epochs':2,  'pe_type': '3d_temporal', 'batch_size': 16, 'feature_size': 144, 'num_enc_layers': 1, 'num_dec_layers': 4, \
+                     'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-5, 'lr_decay': 0.9, 'mask_type':'patch','decoder_only':False} 
     
-    window_size = best_config['window_size']
-    patch_size = best_config['patch_size']
-    pe_type = best_config['pe_type']
-    batch_size = best_config['batch_size']
-    feature_size = best_config['feature_size']
-    num_enc_layers = best_config['num_enc_layers']
-    num_dec_layers = best_config['num_dec_layers']
-    d_ff = best_config['d_ff']
-    num_head = best_config['num_head']
-    dropout = best_config['dropout']
-    lr = best_config['lr']
-    lr_decay = best_config['lr_decay']
-    scale = best_config['scale']
-    option = best_config['option']
-    predict_res = best_config['predict_res']
-    mask_type = best_config['mask_type']
-    decoder_only = best_config['decoder_only']
+    data_config = {'window_size': 10, 'option': 'patch', 'patch_size': (4,4,4), 'scale': True, 'add_noise': True, 'noise': (0,1e-2), 'predict_res': False}
+    best_config = model_config
+    best_config.update(data_config)
+
+    # transformer parameters
+    epochs = model_config['epochs']
+    pe_type = model_config['pe_type']
+    batch_size = model_config['batch_size']
+    feature_size = model_config['feature_size']
+    num_enc_layers = model_config['num_enc_layers']
+    num_dec_layers = model_config['num_dec_layers']
+    d_ff = model_config['d_ff']
+    num_head = model_config['num_head']
+    dropout = model_config['dropout']
+    lr = model_config['lr']
+    lr_decay = model_config['lr_decay']
+    mask_type = model_config['mask_type']
+    decoder_only = model_config['decoder_only']
 
     # dataset parameters
     train_proportion = 0.6
     test_proportion = 0.2
     val_proportion = 0.2
     grid_size = 16
-    
+    window_size = data_config['window_size']
+    patch_size = data_config['patch_size']
+    scale = data_config['scale']
+    option = data_config['option']
+    add_noise = data_config['add_noise']
+    noise = data_config['noise']
+    predict_res = data_config['predict_res']
+
     skip_training = False
     save_model = True
 
     print('-'*20 + ' Config ' + '-'*20, flush=True)
-    print(best_config, flush=True)
+    print(model_config, flush=True)
+    print(data_config, flush=True)
     print('-'*50, flush=True)
 
-    model = Tranformer(feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
+    model = Transformer(feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
         d_ff = d_ff, dropout=dropout,num_head=num_head,pe_type=pe_type,grid_size=grid_size,mask_type=mask_type,patch_size=patch_size,window_size=window_size,decoder_only=decoder_only)
 
 
@@ -247,9 +257,9 @@ if __name__ == "__main__":
     ### SPECIFYING use_coords=True WILL RETURN DATALOADERS FOR COORDS
     train_loader, test_loader, scaler = get_data_loaders(train_proportion, test_proportion, val_proportion,\
         pred_size = 1, batch_size = batch_size, num_workers = 2, pin_memory = False, use_coords = True, use_time = True,\
-        test_mode = True, scale = scale, window_size = window_size, patch_size = patch_size, option = option, predict_res = predict_res)
+        test_mode = True, scale = scale, window_size = window_size, grid_size = grid_size, patch_size = patch_size, \
+        option = option, predict_res = predict_res, add_noise = add_noise, noise = noise, csv_path = csv_path)
     
-    epochs = best_config['epochs']
     train_losses = []
     test_losses = []
     tolerance = 5
@@ -295,7 +305,7 @@ if __name__ == "__main__":
 
             if (epoch%2 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
-                predict_model(model, test_loader, epoch, config=best_config,\
+                predict_model(model, test_loader, epoch, config=best_config, \
                                     plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = predict_res)   
 
             #writer.add_scalar('train_loss',avg_train_loss,epoch)
@@ -330,7 +340,7 @@ if __name__ == "__main__":
 
 ### Predict
     start_time = time.time()
-    final_result = predict_model(model, test_loader,  epoch, config=best_config,\
+    final_result = predict_model(model, test_loader,  epoch, config=best_config ,\
                                             plot=True, plot_range=[0,1], final_prediction=True, predict_res = predict_res)
     prediction = final_result['prediction']
     print('-'*20 + ' Measure for Simulation Speed ' + '-'*20)

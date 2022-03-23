@@ -16,42 +16,6 @@ from sklearn.preprocessing import StandardScaler
 # dict_keys(['Coordinates', 'DatasetNames', 'MaxLevel', 'MeshBlockSize', 'NumCycles', \
 # 'NumMeshBlocks', 'NumVariables', 'RootGridSize', 'RootGridX1', 'RootGridX2', 'RootGridX3', \
 # 'Time', 'VariableNames', 'x1f', 'x1v', 'x2f', 'x2v', 'x3f', 'x3v', 'rho', 'press', 'vel1', 'vel2', 'vel3'])
-def get_rho(data_path, predict_res = False):
-    lst = sorted(os.listdir(data_path))[4:-1]
-    rho = []
-    coords = []
-    timestamps = []
-    for name in lst:
-        path = data_path+'/'+name
-        d = athdf(path)
-        nx1 = len(d['x1v'])
-        nx2 = len(d['x2v'])
-        nx3 = len(d['x3v'])
-        coord = np.transpose(np.array(np.meshgrid(np.arange(nx1),np.arange(nx2),np.arange(nx3))), axes=[2,1,3,0]).reshape(-1,3)
-        rho.append(d['rho'])
-        timestamp_repeated = [d['Time']]*(np.prod(d['rho'].shape))
-        timestamps.extend(timestamp_repeated) 
-        coords.extend(coord)
-        #print(f"Name: {name}, keys: {d.keys()}", flush=True)#x1v: {d['x1v']}, x2v: {d['x2v']}, x3v:{d['x3v']}
-
-    rho = np.array(rho)
-    meshed_blocks = (nx1, nx2, nx3)
-    timestamps = np.array(timestamps)
-    coords = np.array(coords)
-    rho_original = rho.flatten()
-
-    ### TEST: predict all residuals instead of rhos
-    if predict_res:
-        rho_residual = (np.roll(rho_original,-nx1*nx2*nx3)-rho_original)[:-nx1*nx2*nx3] ### Residual
-        timestamps = timestamps[nx1*nx2*nx3:]
-        coords = coords[nx1*nx2*nx3:]
-        #rho_original = rho_original[:-nx1*nx2*nx3] ### to reconstruct truth from residuals, take the first meshblock of rho_original and add the residuals.
-        return rho_original[nx1*nx2*nx3:], rho_residual, meshed_blocks, coords, timestamps
-    else: 
-        return rho_original, meshed_blocks, coords, timestamps
-    # print(f'rho shape: {rho_original.shape}, coords shape: {coords.shape}')
-    # return rho_original, rho_residual, meshed_blocks, coords, timestamps
-
 
 def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16), option='patch', patch_stride = (1,1,1)):
     """
@@ -116,8 +80,10 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
             
     return np.array(out), patches_per_block
 
+
 def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
-              , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch'):
+              , pred_size = 1, scale = False, window_size = 10, patch_size=(4,4,4), option='patch', \
+              add_noise=True, noise=(0,1)):
       
     scaler = StandardScaler()
     if scale == True:
@@ -155,6 +121,13 @@ def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_propor
         train = windows[0:train_len]
         val = windows[train_len:(train_len+val_len)]
         test = windows[(train_len+val_len):]
+    
+    if add_noise == True:
+        mu = noise[0]
+        sigma = noise[1]
+        train_noise = np.random.normal(mu, sigma, train.shape)
+        train = train + train_noise
+    
     print(train.shape,val.shape,test.shape)
     train_data = torch.from_numpy(train).float()
     val_data = torch.from_numpy(val).float()
@@ -181,15 +154,15 @@ class CustomDataset(torch.utils.data.Dataset):
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
                         use_coords = True, use_time = True, test_mode = False, scale = False, \
-                        window_size = 10, patch_size=(1,1,16), option='patch', predict_res=False): 
+                        window_size = 10, grid_size = 16, patch_size=(4,4,4), option='patch', predict_res=False, \
+                        add_noise=True, noise=(0,1e-2), csv_path = '/scratch/zh2095/nyu-capstone/data/data_original_16.csv'): 
     np.random.seed(505)
     
-    data_path='/scratch/zh2095/data_turb_dedt1_16'
-    if predict_res:
-        data_original, data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res) 
-    else:
-        data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res) 
-
+    df = pd.read_csv(csv_path)
+    data = df['target'].to_numpy()
+    coords = df[['x1','x2','x3']].to_numpy()
+    timestamps = df['time'].to_numpy()
+    meshed_blocks = (grid_size, grid_size, grid_size)
 
     ###FOR SIMPLE TEST SINE AND COSINE 
     #long_range_stationary_x_vals = (np.sin(2*np.pi*time_vec/period))+(np.cos(3*np.pi*time_vec/period)) + 0.25*np.random.randn(time_vec.size)
@@ -201,7 +174,8 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         train_coords,val_coords,test_coords, _ = train_test_val_split(\
             coords, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
+            , pred_size = pred_size, scale = False, window_size = window_size, \
+            patch_size = patch_size, option = option, add_noise=False, noise=(0,1e-2))
         print(f'train_coords: {train_coords.shape}')
 
 
@@ -210,14 +184,16 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         train_timestamps,val_timestamps,test_timestamps, _ = train_test_val_split(\
             timestamps, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
+            , pred_size = pred_size, scale = False, window_size = window_size, \
+             patch_size = patch_size, option = option, add_noise=False, noise=(0,1e-2))
         print(f'train_timestamps: {train_timestamps.shape}')
 
     print('-'*20,'split for data')
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
-        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
+        , pred_size = pred_size, scale = scale, window_size = window_size, \
+        patch_size = patch_size, option = option, add_noise=add_noise, noise=(0,1e-2))
     print(f'train_data: {train_data.shape}')
 
 #----------------------------------------------------------------
@@ -238,20 +214,20 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
  #----------------------------------------------------------------   
 
     if test_mode:
-        train_val_data = torch.cat((train_data,val_data),0)
-        train_val_coords = torch.cat((train_coords,val_coords),0)
-        train_val_timestamps = torch.cat((train_timestamps,val_timestamps),0)
+        val_test_data = torch.cat((val_data, test_data),0)
+        val_test_coords = torch.cat((val_coords,test_coords),0)
+        val_test_timestamps = torch.cat((val_timestamps,test_timestamps),0)
 
         ### Get the first block in test_original to perform rollout that gives back the original data based on predicted residuals
 
-        dataset_train_val, dataset_test = CustomDataset(train_val_data,train_val_coords,train_val_timestamps), CustomDataset(test_data,test_coords,test_timestamps)
-        train_val_loader = torch.utils.data.DataLoader(dataset_train_val, batch_size=batch_size, \
+        dataset_train, dataset_test = CustomDataset(train_data,train_coords,train_timestamps), CustomDataset(val_test_data,val_test_coords,val_test_timestamps)
+        train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                         persistent_workers=True, prefetch_factor = 16)
-        test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=1, \
+        test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                         persistent_workers=True, prefetch_factor = 128) 
-        return train_val_loader, test_loader, scaler
+        return train_loader, test_loader, scaler
     if not test_mode:                           
         dataset_train, dataset_test, dataset_val = CustomDataset(train_data,train_coords,train_timestamps), CustomDataset(test_data,test_coords,test_timestamps), CustomDataset(val_data,val_coords,val_timestamps)
 
