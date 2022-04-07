@@ -11,12 +11,13 @@ from matplotlib import patches
 from _arfima import arfima
 from utils import *
 from athena_read import *
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, PowerTransformer, RobustScaler, QuantileTransformer
 ### VARIABLES(KEYS) IN DATASET
 # dict_keys(['Coordinates', 'DatasetNames', 'MaxLevel', 'MeshBlockSize', 'NumCycles', \
 # 'NumMeshBlocks', 'NumVariables', 'RootGridSize', 'RootGridX1', 'RootGridX2', 'RootGridX3', \
 # 'Time', 'VariableNames', 'x1f', 'x1v', 'x2f', 'x2v', 'x3f', 'x3v', 'rho', 'press', 'vel1', 'vel2', 'vel3'])
-def get_rho(data_path, predict_res = False):
+def get_rho(data_path, predict_res = False, noise_std = 0.01):
+    np.random.seed(1008)
     lst = sorted(os.listdir(data_path))[4:]
     rho = []
     coords = []
@@ -40,6 +41,7 @@ def get_rho(data_path, predict_res = False):
     time_map_indices = {t:i for i,t in enumerate(np.unique(timestamps))}
     coords = np.array(coords)
     rho_original = rho.flatten()
+    #rho_original = rho_original + np.random.normal(0,noise_std,len(rho_original))
 
     ### TEST: predict all residuals instead of rhos
     if predict_res:
@@ -118,9 +120,21 @@ def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16
     return np.array(out), patches_per_block
 
 def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
-              , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch'):
-      
-    scaler = StandardScaler()
+              , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch', scaler_type='standard'):
+    if scaler_type not in ['standard','power_box','power_yeo','robust']:
+        scaler_type = 'standard'
+    if scaler_type == 'standard':
+        scaler = StandardScaler()
+    elif scaler_type == 'power_box':
+        scaler = PowerTransformer(method='box-cox',standardize=True)
+    elif scaler_type == 'power_yeo':
+        scaler = PowerTransformer(method='yeo-johnson',standardize=True)
+    elif scaler_type == 'robust':
+        scaler = RobustScaler(with_centering=False,with_scaling=True,quantile_range=(25.0, 75.0),copy=True,unit_variance=False)
+    elif scaler_type == 'quantile':
+        scaler = QuantileTransformer(output_distribution='normal')
+    print(f'Using scaler: {scaler_type}')
+    
     if scale == True:
         data = scaler.fit_transform(data.reshape(-1, 1)).reshape(-1)
     if option in ['patch','patch_overlap']: ### Force each set start on a new block
@@ -183,24 +197,24 @@ class CustomDataset(torch.utils.data.Dataset):
         src_timestamp, tgt_timestamp = self.timestamp[idx][0], self.timestamp[idx][1]
         src_coords, tgt_coords = self.coords[idx][0], self.coords[idx][1]
         src_x, tgt_x = self.x[idx][0], self.x[idx][1]
-        prev_block_endtime_index = self.time_map_indices[src_timestamp.max().item()] #Find the largest time index in src
+        # prev_block_endtime_index = self.time_map_indices[src_timestamp.max().item()] #Find the largest time index in src
         return( (src_x.view(-1,1), tgt_x.view(-1,1)),\
                 (src_coords, tgt_coords),\
-                (src_timestamp.view(-1,1), tgt_timestamp.view(-1,1)),
-                self.data[(prev_block_endtime_index-self.window_size+1)*self.grid_dim:(prev_block_endtime_index+1)*self.grid_dim] ) #return blocks before current timestep
+                (src_timestamp.view(-1,1), tgt_timestamp.view(-1,1)) )
+                # self.data[(prev_block_endtime_index-self.window_size+1)*self.grid_dim:(prev_block_endtime_index+1)*self.grid_dim] ) #return blocks before current timestep
     
 
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
                         use_coords = True, use_time = True, test_mode = False, scale = False, \
-                        window_size = 10, patch_size=(1,1,16), grid_size=(16,16,16), option='patch', predict_res=False): 
+                        window_size = 10, patch_size=(1,1,16), grid_size=(16,16,16), option='patch', predict_res=False, noise_std=0.01, scaler_type='standard'): 
     np.random.seed(505)
     
     data_path='/scratch/yd1008/nyu-capstone/data_turb_dedt1_16'
     if predict_res:
-        data_original, data, meshed_blocks, coords, timestamps, time_map_indices = get_rho(data_path, predict_res=predict_res) 
+        data_original, data, meshed_blocks, coords, timestamps, time_map_indices = get_rho(data_path, predict_res=predict_res, noise_std =noise_std) 
     else:
-        data, meshed_blocks, coords, timestamps, time_map_indices = get_rho(data_path, predict_res=predict_res) 
+        data, meshed_blocks, coords, timestamps, time_map_indices = get_rho(data_path, predict_res=predict_res, noise_std=noise_std) 
 
 
     ###FOR SIMPLE TEST SINE AND COSINE 
@@ -229,7 +243,7 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
-        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option)
+        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option, scaler_type = scaler_type)
     print(f'train_data: {train_data.shape}')
 
 #----------------------------------------------------------------
@@ -296,7 +310,7 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
 
 def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], slice_axis_index=0, \
                   pred_colname='prediction',truth_colname='truth', time_colname='time',  \
-                  plot_anime = True, img_dir = 'figs', config={}):
+                  plot_anime = True, img_dir = 'figs', config={}, file_prefix='test'):
     '''
     Notes: 
         please create two subfolders 'gif' and 'mp4' to save the animated slice plot for each trail 
@@ -399,7 +413,7 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         axes[-1,2].annotate('Residual',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
         #axes[-1,0].annotate('Slice number', (0, 0.5), xytext=(-50, 0), textcoords='offset points', xycoords='axes fraction', ha='left', va='center', size=15, rotation=90)
         fig.suptitle(f'Forecasts on slices across {slice_axis_colname} at timestamp {ts}',x=0.2,y=1,size=20)
-        plt.savefig(img_dir+f'/ts_{ts}_result.png', bbox_inches="tight")
+        plt.savefig(img_dir+f'/{file_prefix}_ts_{ts}_result.png', bbox_inches="tight")
         plt.close()
         
     if plot_anime:
@@ -432,10 +446,10 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         ani = animation.ArtistAnimation(fig, imgs, interval=500, repeat_delay = 1000, blit=True)
         try:
             writer = animation.FFMpegWriter(fps=30, bitrate=1800)
-            ani.save(img_dir+"/mp4"+f"/{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.mp4", writer=writer) 
+            ani.save(img_dir+"/mp4"+f"/{file_prefix}_{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.mp4", writer=writer) 
         except:
             print('Saving animation in .mp4 format, try installing ffmpeg package. \n Saving to .gif instead')
-            ani.save(img_dir+"/gif"+f"/{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.gif")
+            ani.save(img_dir+"/gif"+f"/{file_prefix}_{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.gif")
 
 def plot_demo(num_timestamps, grid_size, patch_size, img_dir):
     '''
