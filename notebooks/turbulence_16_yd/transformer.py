@@ -2,6 +2,7 @@
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+import copy
 from functools import reduce, lru_cache
 from operator import mul
 from einops import rearrange, reduce as Reduce
@@ -12,13 +13,13 @@ import time
 from tmsa import TMSAG
 from unet_3d import UNet
 
-def reshape_3d(x, grid_size,):
-    return x.reshape((-1,)+grid_size)
+# def reshape_3d(x, grid_size,):
+#     return x.reshape((-1,)+grid_size)
 
 def roll_block(x, shift_size, reverse=False):
     '''
     meshblock: torch.Tensor size (N, D, H, W, C) #meshblocks x (nx1 x nx2 x nx3) x #channels
-    shift_size: tuple (St, Sd, S)
+    shift_size: tuple (Sn, Sd, Sh, Sw)
     '''
     if reverse:
         shift_size = [-s for s in list(shift_size)]
@@ -35,13 +36,17 @@ def block_to_patch(x, patch_size, pad_size=1, stride_size = None):
     stride_size = stride_size or patch_size
     p1, p2, p3 = patch_size
     s1, s2, s3 = stride_size
-    if pad_size>0:
+    if pad_size==1:
         #x_padded = torch.cat([x,Reduce(x,'n g1 g2 g3 c -> g1 g2 g3 c', 'mean').unsqueeze(0)],dim=0) # mean padding only pad size 1 is implemented
-        x_padded = torch.cat([x,x[-pad_size:]],dim=0) # same padding for the target block
-        # x_padded = F.pad(x,(0,0,0,0,0,0,0,0,0,pad_size)) # zero padding for target block
-    x_padded = x_padded.unfold(0,N,pad_size).unfold(1,p1,s1).unfold(2,p2,s2).unfold(3,p3,s3)
-    src, tgt = rearrange(x_padded, 'nb n1 n2 n3 c b p1 p2 p3 -> nb (n1 n2 n3) (b p1 p2 p3) c')
-    return src, tgt
+        # x_padded = torch.cat([x,x[-pad_size:]],dim=0) # same padding for the target block
+        x_padded = F.pad(x,(0,0,0,0,0,0,0,0,0,pad_size)) # zero padding for target block
+        x_padded = x_padded.unfold(0,N,pad_size).unfold(1,p1,s1).unfold(2,p2,s2).unfold(3,p3,s3)
+        out_x, out_y = rearrange(x_padded, 'nb n1 n2 n3 c b p1 p2 p3 -> nb (n1 n2 n3) (b p1 p2 p3) c')
+        return out_x, out_y
+    if pad_size==0:
+        x_padded = x.unfold(1,p1,s1).unfold(2,p2,s2).unfold(3,p3,s3)
+        out_x = rearrange(x_padded, 'b n1 n2 n3 c p1 p2 p3 -> (n1 n2 n3) (b p1 p2 p3) c')
+        return out_x
 
 def patch_to_block(x, window_size, patch_size, grid_size):
     '''
@@ -136,8 +141,11 @@ class conv_3d(nn.Module):
         for _ in range(num_layer-1):
             layers.append(nn.Conv3d(in_channels=dim, out_channels=dim_out, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, padding_mode=padding_mode))
             layers.append(nn.BatchNorm3d(dim_out))
-            layers.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
-        layers.append(nn.Conv3d(in_channels=dim_out, out_channels=dim_out, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, padding_mode=padding_mode))
+            #layers.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+        if num_layer ==1:
+            layers.append(nn.Conv3d(in_channels=dim, out_channels=dim_out, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, padding_mode=padding_mode))
+        else:
+            layers.append(nn.Conv3d(in_channels=dim_out, out_channels=dim_out, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, padding_mode=padding_mode))
         layers.append(nn.BatchNorm3d(dim_out))
         self.conv = nn.Sequential(*layers)
         # self.conv = nn.Sequential(
@@ -198,14 +206,35 @@ class TemporalEmbedding(nn.Module):
         x = self.fc1(x)
         return x
 
+class Transformer_Decoder(nn.Module):
+    def __init__(self,feature_size,num_layers, decoder_layer):
+        super().__init__()
+        self.num_layers = num_layers
+        self.layers = nn.ModuleList([copy.deepcopy(decoder_layer) for i in range(num_layers)])
+        self.norm = nn.LayerNorm(feature_size, eps=1e-5)
+    
+    def forward(self,tgt,memory,tgt_mask,memory_mask,embedding,embedding_insert_layer):
+        assert embedding_insert_layer <= self.num_layers
+        assert embedding.shape == tgt.shape
+        output = tgt
+        for i,layer in enumerate(self.layers):
+            if embedding_insert_layer == (i+1):
+                output = output + embedding
+            output = layer(output,memory,tgt_mask,memory_mask)
+
+        output = self.norm(output)
+        
+        return output
+
 class Transformer(nn.Module):
-    def __init__(self,all_data,feature_size=250,num_enc_layers=1,num_dec_layers=1,d_ff = 256, dropout=0.1,num_head=2,pe_type='3d',\
-                grid_size=(16,16,16),mask_type=None,patch_size=(2,2,2),window_size=5,pred_size=1,decoder_only=False,tmsa_config={},conv_config={}):
+    def __init__(self,all_data,feature_size=250,num_enc_layers=1,num_dec_layers=1,d_ff = 256, dropout=0.1,num_head=2,pe_type='3d',encoder_decoder_type='conv',\
+                grid_size=(16,16,16),mask_type=None,patch_size=(2,2,2),window_size=5,pred_size=1,decoder_only=False,tmsa_config={},conv_config={},load_prev_acrc=False,\
+                ablation={'tmsa':True, 'temp_embed':True, 'encoder':True}):
         '''
         mask_type: 'patch' if using cuboic patches, which masks by patch instead of elements. Default to None (square_subsequent mask)
         '''
         super(Transformer, self).__init__()
-
+        self.encoder_decoder_type = encoder_decoder_type
         self.all_data = all_data
         self.feature_size = feature_size
         self.patch_size = patch_size
@@ -215,40 +244,28 @@ class Transformer(nn.Module):
         self.grid_size = grid_size
         self.grid_dim = np.prod(grid_size)
         self.decoder_only = decoder_only
-
+        self.num_dec_layers = num_dec_layers
         self.pe_type = pe_type
         self.src_mask = mask_type
         self.pos_encoder = PositionalEncoding(feature_size)
         self.pos3d_encoder = PositionalEmbedding3D(feature_size,grid_size)
+        self.pos_insert = tmsa_config['pos_insert']
         self.temporal_encoder = TemporalEmbedding(input_dim=1, output_dim=feature_size, activation='sin')
 
-        self.conv_type = conv_config['conv_type']
-        if conv_config['conv_type'] == 'UNet':
-            print('Using UNET')
-            self.conv_embedding = UNet(in_channels = feature_size,
-                                        out_channels = feature_size//2,
-                                        n_blocks = conv_config['num_layer'],
-                                        start_filts = conv_config['start_filts'],
-                                        up_mode = 'transpose',
-                                        merge_mode = 'concat',
-                                        planar_blocks = (),
-                                        batch_norm = 'unset',
-                                        attention = False,
-                                        activation = 'rrelu',
-                                        normalization = 'batch',
-                                        full_norm = True,
-                                        dim = 3,
-                                        conv_mode = 'same')
-        else:
-            print('Using regular CONV')
-            self.conv_embedding = conv_3d(feature_size,feature_size, num_layer = conv_config['num_layer'], kernel_size = conv_config['kernel_size'], padding = conv_config['padding'], padding_mode = conv_config['padding_mode']) ### 5 a good number?
+        # self.norm1_src = nn.InstanceNorm3d(feature_size, eps=1e-5)
+        # self.norm1_tgt = nn.InstanceNorm3d(feature_size, eps=1e-5)
+        # self.norm2_src = nn.InstanceNorm3d(feature_size, eps=1e-5)
+        # self.norm2_tgt = nn.InstanceNorm3d(feature_size, eps=1e-5)
+        self.norm1_src = nn.LayerNorm(feature_size, eps=1e-5)
 
+        self.conv_encoder = conv_3d(5,feature_size, num_layer = 2, kernel_size = 3, padding = 1, padding_mode = 'circular')
 
+       
         self.use_tmsa = tmsa_config['use_tmsa']
         self.use_tgt_tmsa = tmsa_config['use_tgt_tmsa']
-        if self.use_tmsa:
+        if self.use_tmsa and ablation['tmsa']:
             self.tmsa_block = TMSAG(dim = feature_size,
-                            dim_out = feature_size//2,
+                            dim_out = feature_size,
                             depth = tmsa_config['depth'],
                             num_heads = tmsa_config['num_heads'],
                             window_patch_size=tmsa_config['window_patch_size'],
@@ -262,14 +279,20 @@ class Transformer(nn.Module):
                             use_checkpoint_attn=False,
                             use_checkpoint_ffn=False
                             )
+                            
+        if not decoder_only:
+            self.encoder_layer = nn.TransformerEncoderLayer(d_model=feature_size, \
+                nhead=num_head, dropout=dropout, dim_feedforward = d_ff)
+            self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_enc_layers)      
 
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=feature_size, \
-            nhead=num_head, dropout=dropout, dim_feedforward = d_ff)
-        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_enc_layers)      
         self.decoder_layer = nn.TransformerDecoderLayer(d_model=feature_size, \
             nhead=num_head, dropout=dropout, dim_feedforward = d_ff)  
-        self.transformer_decoder = nn.TransformerDecoder(self.decoder_layer, num_layers=num_dec_layers)
-        self.decoder = nn.Linear(feature_size,1)
+        self.transformer_decoder = Transformer_Decoder(feature_size,num_dec_layers,self.decoder_layer)
+
+        self.linear_decoder = nn.Sequential(nn.Linear(feature_size,feature_size//2),
+                                                nn.Linear(feature_size//2,5))
+        self.ablation = ablation
+
         self.init_weights()
 
     def init_weights(self):
@@ -277,28 +300,28 @@ class Transformer(nn.Module):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
-        self.decoder.bias.data.zero_()
-        self.decoder.weight.data.uniform_(-initrange, initrange)
+        try:
+            self.transformer_decoder.bias.data.zero_()
+            self.transformer_decoder.weight.data.uniform_(-initrange, initrange)
+        except:
+            print('Error in initializing decoder weights')
 
-    def forward(self, src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices):
+    def forward(self, src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, shift_size=(0,0,0,0), temporal_insert_layer=2):
+        
+        ###ROLL ALL INPUTS
+        src = roll_block(src, shift_size, reverse=False)
+        tgt = roll_block(tgt, shift_size, reverse=False)
+        src_coord = roll_block(src_coord, shift_size, reverse=False)
+        tgt_coord = roll_block(tgt_coord, shift_size, reverse=False)
+        src_ts = roll_block(src_ts, shift_size, reverse=False)
+        tgt_ts = roll_block(tgt_ts, shift_size, reverse=False)
 
-        B,N,_ = src.shape
         device = src.device
-         
+        src_coord_patch = block_to_patch(src_coord, self.patch_size, pad_size=0)   
+        tgt_coord_patch = block_to_patch(tgt_coord, self.patch_size, pad_size=0) 
+        src_ts_patch = block_to_patch(src_ts, self.patch_size, pad_size=0)   
+        tgt_ts_patch = block_to_patch(tgt_ts, self.patch_size, pad_size=0)
 
-        # try:
-        #     self.test_plot(tmsa_embedded[0][:,:,6].squeeze(-1).detach().cpu().numpy(),\
-        #                     block[0][:,:,6].squeeze(-1).detach().cpu().numpy(),\
-        #                     'tmsa_n0_a_a_6.png')
-        #     self.test_plot(tmsa_embedded[4][:,:,8].squeeze(-1).detach().cpu().numpy(),\
-        #                     block[4][:,:,8].squeeze(-1).detach().cpu().numpy(),\
-        #                     'tmsa_n4_a_a_6.png')
-        #     self.test_plot(tmsa_embedded[8][:,:,14].squeeze(-1).detach().cpu().numpy(),\
-        #                     block[8][:,:,14].squeeze(-1).detach().cpu().numpy(),\
-        #                     'tmsa_n8_a_a_14.png')
-        # except:
-        #     pass
-            
         if self.pe_type == '1d':
             src = src.permute(1,0,2)
             tgt = tgt.permute(1,0,2)
@@ -312,73 +335,79 @@ class Transformer(nn.Module):
             tgt = tgt + self.pos3d_encoder(tgt_coord)
             
         elif self.pe_type == '3d_temporal':
-
-            src = src + self.pos3d_encoder(src_coord) + self.temporal_encoder(src_ts)
-            tgt = tgt + self.pos3d_encoder(tgt_coord) + self.temporal_encoder(tgt_ts)
+            src_pos_embed = self.pos3d_encoder(src_coord_patch) 
+            src_ts_embed = self.temporal_encoder(src_ts_patch)
+            tgt_pos_embed = self.pos3d_encoder(tgt_coord_patch) 
+            tgt_ts_embed = self.temporal_encoder(tgt_ts_patch)
+        
+        if not self.ablation['temp_embed']:
+            src_ts_embed = torch.zeros_like(src_ts_embed)
+            tgt_ts_embed = torch.zeros_like(tgt_ts_embed)
             
-        #print(f'src shape {src.shape}, tgt shape: {tgt.shape}')
-        ### generate patch mask
-        block = patch_to_block(src,self.window_size,self.patch_size,self.grid_size)
-        ### CONV EMBEDDING
-        if self.conv_type == 'UNet':
-            # print(f'{self.conv_embedding}', flush=True)
-            conv_embedded = self.conv_embedding(block.permute(0,4,1,2,3)).permute(0,2,3,4,1)
+            
+        ### conv encoder to change demension from 5 to feature_size
+
+        src = self.norm1_src(self.conv_encoder(src,self.grid_size)) #+ src_pos_temp_block
+        tgt = self.norm1_src(self.conv_encoder(tgt,self.grid_size)) #+ tgt_pos_temp_block
+
+
+
+        src_pos_embed_b = patch_to_block(src_pos_embed, self.window_size, self.patch_size, self.grid_size)
+        tgt_pos_embed_b = patch_to_block(tgt_pos_embed, self.window_size, self.patch_size, self.grid_size)
+
+        #if not self.tmsa_with_conv:
+        if self.ablation['tmsa']:
+            if self.pos_insert in ['tmsa','both']:
+                src_tmsa_embedded = self.tmsa_block(src+src_pos_embed_b)#+src_conv_embedded
+                tgt_tmsa_embedded = self.tmsa_block(tgt+tgt_pos_embed_b)#+tgt_conv_embedded
+            else:
+                src_tmsa_embedded = self.tmsa_block(src)
+                tgt_tmsa_embedded = self.tmsa_block(tgt)
         else:
-            conv_embedded = self.conv_embedding(block,self.grid_size)
-        # src_conv, tgt_conv = block_to_patch(conv_embedded, self.patch_size, pad_size=1)
+            src_tmsa_embedded = src
+            tgt_tmsa_embedded = tgt
 
-        ### TMSA
-        # src = src + src_conv
-        # tgt = tgt + tgt_conv
-        if self.use_tmsa:
-            # conv_embedded = block #+ conv_embedded
-            tmsa_embedded = self.tmsa_block(block)
-            # src_tmsa, tgt_tmsa = block_to_patch(tmsa_embedded, self.patch_size, pad_size=1)
-            # src = src + src_tmsa
-            # if self.use_tgt_tmsa:
-            #     tgt = tgt  + tgt_tmsa
-            # else:
-            #     tgt = tgt
-        # print(f'conv: {conv_embedded.shape}, tmsa: {tmsa_embedded.shape}', flush=True)
-        src_embedded, tgt_embedded = block_to_patch(torch.cat([conv_embedded,tmsa_embedded], dim=4), self.patch_size, pad_size=1)
-        src = src + src_embedded
-        if self.use_tgt_tmsa:
-            tgt = tgt  + tgt_embedded
+        if self.pos_insert in ['transformer','both']:
+            src = block_to_patch(src + src_tmsa_embedded, self.patch_size, pad_size=0) + src_pos_embed #+ src_ts_embed
+            tgt = block_to_patch(tgt + tgt_tmsa_embedded, self.patch_size, pad_size=0) + tgt_pos_embed #+ tgt_ts_embed
         else:
-            tgt = tgt
-
-
+            src = block_to_patch(src + src_tmsa_embedded, self.patch_size, pad_size=0)  
+            tgt = block_to_patch(tgt + tgt_tmsa_embedded, self.patch_size, pad_size=0) 
+        
+      
+        ### Transformer
         src = src.permute(1,0,2)
         tgt = tgt.permute(1,0,2)
         if self.src_mask == 'patch':
             self.mask = self._generate_patch_mask(self.patch_size,self.window_size,0).to(device)
-            self.dec_src_mask = self._generate_patch_mask(self.patch_size,self.window_size,-1).to(device)
-            #print(f'Using patch mask: mask: {self.mask}, shape: {self.mask.shape}', flush=True)
-            #self.src_mask = mask
+            self.dec_src_mask = self._generate_patch_mask(self.patch_size,self.window_size,0).to(device)
+
         elif self.src_mask is None or self.src_mask.size(0) != len(src):
             device = src.device
             self.mask = self._generate_square_subsequent_mask(src.shape[0]).to(device)
-            #print(f'Using original mask: mask: {self.mask}, shape: {self.mask.shape}', flush=True)
-            #self.src_mask = mask
 
-        # print('PE out shape: ',self.pos_encoder(src).shape)
-        # print('PE out shape: ',self.pos_encoder(src).shape)
-        # src = self.pos_encoder(src)
-        # tgt = self.pos_encoder(tgt)
-        #print(f'after pe src shape {src.shape}, tgt shape: {tgt.shape}')
         if self.decoder_only:
-            #print('USING DECODER ONLY')
-            #print(f'after pe src shape {src.shape}, tgt shape: {tgt.shape}', flush=True) #(sequence, batch_size, feature_size)
-            output_dec = self.transformer_decoder(tgt,src,self.mask,self.dec_src_mask)
+            output_dec = self.transformer_decoder(tgt,src,self.mask,None, tgt_ts_embed.permute(1,0,2), temporal_insert_layer)
+            # output_dec = self.decoder_layer(tgt,src,self.mask,self.dec_src_mask)
         else:
             output_enc = self.transformer_encoder(src,self.mask) 
-            #print(f'encoder output shape: {output_enc.shape}', flush=True)
-            output_dec = self.transformer_decoder(tgt,output_enc,self.mask, self.dec_src_mask)
-            #print(f'decoder output shape: {output_dec.shape}', flush=True)
-        output = self.decoder(output_dec)
+            output_dec = self.transformer_decoder(tgt,output_enc,self.mask, self.dec_src_mask, tgt_ts_embed.permute(1,0,2), temporal_insert_layer)
+        # print(f'output patch transformer shape: {output_dec.shape}')
+        # print(f'output patch transformer: {output_dec[:27,-2,0]}')
+        # print(f'output patch shape: {output.shape}')
+        # print(f'output patch: {output[:27,-2,0]}')
+        output = output_dec.permute(1,0,2)
 
-        #print('output shape: ',output.shape)
-        return output.permute(1,0,2)
+        output = patch_to_block(output, self.window_size, self.patch_size, self.grid_size)
+
+        output = self.linear_decoder(output)
+        # output = self.linear_decoder(output)
+
+        # print(f'output block: {output[-2,:3,:3,:3,0]}')
+        ###ROLL BACK TO ORIGINAL ORDER
+        output = roll_block(output, shift_size, reverse=True)
+
+        return output
 
     # def generate_cov3d_embedding(self, data):
     #     return self.conv_embedding(data, self.grid_size)

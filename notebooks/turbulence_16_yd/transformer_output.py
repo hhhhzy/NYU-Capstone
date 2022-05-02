@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils import tensorboard
 import torch.optim as optim
+from itertools import product
 import pandas as pd
 import numpy as np
 from einops import reduce
@@ -12,7 +13,7 @@ import seaborn as sns
 import time
 import random
 import os
-from transformer import Transformer, block_to_patch, patch_to_block
+from transformer import Transformer
 from utils import *
 
 class early_stopping():
@@ -38,15 +39,17 @@ class early_stopping():
                 print('Early stopping')
             print(f'----Current loss {val_loss} higher than best loss {self.best_loss}, early stop counter {self.counter}----')
     
-def process_one_batch(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts, patch_size): 
-    x1, x2, x3 = patch_size
-    # dec_inp = torch.zeros([tgt.shape[0], x1*x2*x3, tgt.shape[-1]]).float().to(device)
-    # dec_inp = torch.cat([tgt[:,:(tgt.shape[1]-x1*x2*x3),:], dec_inp], dim=1).float().to(device)
-    outputs = model(src, tgt, src_coord, tgt_coord, src_ts, tgt_ts)
+def get_roll_strides(stride,dim=3):
+    '''
+    stride int: number of pixels to roll on each dimension
+    '''
+    assert type(stride) in [int,list], f"Expect stride to be type int or list, got {type(stride)}"
+    if type(stride) == int:
+        return list(set(product([stride,0],repeat=dim)))
+    elif type(stride) == list:
+        return list(set(product(stride+[0],repeat=dim)))
 
-    return outputs, tgt
-
-def evaluate(model,data_loader,criterion, patch_size, predict_res = False, time_map_indices = None):
+def evaluate(model,data_loader,criterion, patch_size, predict_res = False):
     model.eval()    
     test_rollout = torch.Tensor(0)   
     test_result = torch.Tensor(0)  
@@ -63,30 +66,34 @@ def evaluate(model,data_loader,criterion, patch_size, predict_res = False, time_
             src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), src_coord.to(device),\
                                                             tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
             if i==0:
-                B, N, C = src.shape
+                N,D,H,W,C = src.shape
                 enc_in = src
                 test_rollout = src
             else:
-                enc_in = test_rollout[:,-N:,:]
+                enc_in = test_rollout[-N:]
 
+             # dec_rollout = reduce(enc_in.view(B,window_size,patch_length,-1), 'b n p c -> b p c', 'mean')
+            dec_rollout = torch.zeros_like(enc_in[:pred_size]) 
+            dec_in = torch.cat([enc_in[pred_size:], dec_rollout], dim=0).float()
+            # dec_in = torch.cat([(enc_in.roll(-1,0)-enc_in)[:-pred_size], dec_rollout], dim=0).float()
+
+            enc_in = enc_in + (torch.empty(enc_in.shape).normal_(mean=0,std=noise_std)).to(device)
+            dec_in = dec_in + (torch.empty(dec_in.shape).normal_(mean=0,std=noise_std)).to(device)
+            output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts,temporal_insert_layer = temporal_insert_layer)
             if predict_res:
-                res = torch.roll(enc_in,-patch_length,1)-enc_in
-                res_rollout = torch.cat([res[:,:-patch_length,:],res[:,-patch_length*2:-patch_length,:]],dim=1) #+ (torch.empty(enc_in.shape).normal_(mean=0,std=noise_std)).to(device)###repeat the second to the last patch of residuals
-                output = model(enc_in,res_rollout,src_coord,tgt_coord,src_ts,tgt_ts, time_map_indices)
+                res = tgt - src
+                total_loss += criterion(output[-pred_size:,:,:,:,0], res[-pred_size:,:,:,:,0]).detach().cpu().numpy()
+                print(f'Output: \n {output[-pred_size,0,0,:20,0].view(-1)} \n Truth: \n {res[-pred_size,0,0,:20,0].view(-1)}')
                 output = output + enc_in
-            else:
-                dec_rollout = enc_in[:,-patch_length:,:]
-                dec_in = torch.cat([enc_in[:,patch_length:,:], dec_rollout], dim=1).float()
-                dec_in = dec_in + (torch.empty(dec_in.shape).normal_(mean=0,std=noise_std)).to(device)
-                output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices)
-            test_rollout = torch.cat([test_rollout,output[:,-patch_length:,:]], dim=1)
+            else: 
+                total_loss += criterion(output[:,-x1*x2*x3:,0], tgt[:,-x1*x2*x3:,0]).detach().cpu().numpy()
 
-            total_loss += criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:]).detach().cpu().numpy()
+            test_rollout = torch.cat([test_rollout,output[-pred_size:,:,:,:,:]], dim=0)
 
     return total_loss
 
 def predict_model(model, test_loader, epoch, config={},\
-                    plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = False, time_map_indices = None, file_prefix = ''):
+                    plot=True, plot_range=[0,0.01], final_prediction=False, predict_res = False, file_prefix = ''):
     '''
     Note: 
         Dont forget to create a subfolder final_plot under figs
@@ -109,39 +116,34 @@ def predict_model(model, test_loader, epoch, config={},\
     with torch.no_grad():
         for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(test_loader):
 
-            src, _, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), src_coord.to(device),\
+            src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), src_coord.to(device),\
                                                                             tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
-            if i==0:
-                B, N, C = src.shape
-                enc_in = src
-                test_rollout = src
-                # src_block = src_block.to(device)
-            else:
-                enc_in = test_rollout[:,-N:,:]
-                # src_block = patch_to_block(enc_in, window_size, patch_size, (grid_size,)*3).to(device)
-                # print(f'Iteration: {i}, \n enc_in: {enc_in[:,-patch_length:,:].squeeze(-1)}, \n shape: {enc_in[:,-patch_length:,:].shape}') #40960 / 10 16 16 16 1 / 
-                # print(f'Iteration: {i}, \n src_block: {src_block.squeeze(-1)}, \n shape: {src_block.shape}') #40960 / 10 16 16 16 1 / 
-                # print(f'Is btp and ptb equal: {torch.all(block_to_patch(src_block,patch_size)[0]==enc_in)}')
+            
+            temp_rollout = []
+            for shift_size in get_roll_strides([0]):
+                shift_size = (0,) + shift_size
+                if i==0:
+                    N,D,H,W,C = src.shape
+                    enc_in = src
+                    test_rollout = src
+                    # src_block = src_block.to(device)
+                else:
+                    enc_in = test_rollout[-N:]
+                # dec_rollout = reduce(enc_in.view(B,window_size,patch_length,-1), 'b n p c -> b p c', 'mean')
+                dec_rollout = torch.zeros_like(enc_in[:pred_size]) 
+                dec_in = torch.cat([enc_in[pred_size:], dec_rollout], dim=0).float()
+                # dec_in = dec_in + (torch.empty(dec_in.shape).normal_(mean=0,std=noise_std)).to(device)
+                output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts, shift_size, temporal_insert_layer)
 
-            # dec_rollout = reduce(enc_in.view(B,window_size,patch_length,-1), 'b n p c -> b p c', 'mean')
-            # dec_rollout = torch.zeros((enc_in.shape[0],patch_length,enc_in.shape[2])).float().to(device)
-            if predict_res:
-                res = torch.roll(enc_in,-patch_length,1)-enc_in
-                res_rollout = torch.cat([res[:,:-patch_length,:],res[:,-patch_length*2:-patch_length,:]],dim=1) #+ (torch.empty(enc_in.shape).normal_(mean=0,std=noise_std)).to(device)###repeat the second to the last patch of residuals
-                output = model(enc_in,res_rollout,src_coord,tgt_coord,src_ts,tgt_ts, time_map_indices)
                 output = output + enc_in
-            else:
-                dec_rollout = enc_in[:,-patch_length:,:]
-                dec_in = torch.cat([enc_in[:,patch_length:,:], dec_rollout], dim=1).float()
-                dec_in = dec_in + (torch.empty(dec_in.shape).normal_(mean=0,std=noise_std)).to(device)
-                output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices)
+                temp_rollout.append(output)
 
-            # print(f'Iteration: {i}, \n output: {output[:,-patch_length:,:].squeeze(-1)}, \n shape: {output[:,-patch_length:,:].shape}') #64 64 1 / 64 64 1/
-            test_rollout = torch.cat([test_rollout,output[:,-patch_length:,:]], dim=1)
-            test_ts = torch.cat((test_ts, tgt_ts[:,-patch_length:,:].flatten().detach().cpu()), 0)
-            test_coord = torch.cat((test_coord, tgt_coord[:,-patch_length:,:].reshape(-1,3).detach().cpu()), 0)
-            truth = torch.cat((truth, tgt[:,-patch_length:,:].flatten().detach().cpu()), 0)
-            test_result = torch.cat((test_result, output[:,-patch_length:,:].flatten().detach().cpu()), 0)
+            output = torch.stack(temp_rollout, dim=0).mean(dim=0)
+            test_rollout = torch.cat([test_rollout,output[-pred_size:,:,:,:,:]], dim=0)
+            test_ts = torch.cat((test_ts, tgt_ts[-pred_size:,:,:,:,:].flatten().detach().cpu()), 0)
+            test_coord = torch.cat((test_coord, tgt_coord[-pred_size:,:,:,:,:].reshape(-1,3).detach().cpu()), 0)
+            truth = torch.cat((truth, tgt[-pred_size:,:,:,:,0].flatten().detach().cpu()), 0)
+            test_result = torch.cat((test_result, output[-pred_size:,:,:,:,0].flatten().detach().cpu()), 0)
         
 
         # if predict_res:
@@ -169,7 +171,6 @@ def predict_model(model, test_loader, epoch, config={},\
         #     final_result = residuals
 
     if plot==True:
-
         a = torch.cat([test_ts.unsqueeze(-1), test_coord, test_result.unsqueeze(-1), truth.unsqueeze(-1)], dim=-1)
         a = a.numpy()
         a = a[np.argsort(a[:, 3])]
@@ -195,6 +196,10 @@ def predict_model(model, test_loader, epoch, config={},\
         if config['scale']==True:
             test_result = torch.Tensor(scaler.inverse_transform(test_result.unsqueeze(-1)))
             truth = torch.Tensor(scaler.inverse_transform(truth.unsqueeze(-1)))
+        else:
+            test_result = test_result.unsqueeze(-1)
+            truth = truth.unsqueeze(-1)
+
         a = torch.cat([test_ts.unsqueeze(-1), test_coord, test_result, truth], dim=-1)
         a = a.numpy()
         a = a[np.argsort(a[:, 3])]
@@ -234,7 +239,7 @@ def predict_model(model, test_loader, epoch, config={},\
 
 if __name__ == "__main__":
     print(f'Pytorch version {torch.__version__}')
-    root_dir = '/scratch/yd1008/nyu_capstone_2/notebooks/turbulence_16_yd/tune_results_2/'
+    root_dir = '/scratch/yd1008/nyu_capstone_2/notebooks/turbulence_16_yd/tune_results/'
     sns.set_style("whitegrid")
     sns.set_palette(['#57068c','#E31212','#01AD86'])
     plt.rcParams['animation.ffmpeg_path'] = '/ext3/conda/bootcamp/bin/ffmpeg'
@@ -250,24 +255,55 @@ if __name__ == "__main__":
     # {'unet_num_layer': 4, 'unet_start_filts': 128, 'tmsa_window_shift_size': '24441222', 'tmsa_depth': 4, 'noise_std': 0.15, 'window_size': 8, \
     # 'scaler_type': 'standard', 'feature_size': 288, 'num_enc_layers': 3, 'num_dec_layers': 3, 'num_heads': 8, 'd_ff': 1024, 'dropout': 0.1, \
     # 'lr': 1e-05, 'lr_decay': 0.9, 'loss_type': 'huber', 'delta': 1.5, 'reg_var': 0.05}
-    # Tuned result 2: random try
-    {'unet_num_layer': 3, 'unet_start_filts': 128, 'tmsa_window_shift_size': '24441222', 'tmsa_depth': 4, \
-    'noise_std': 0.01, 'window_size': 7, 'scaler_type': 'quantile', 'feature_size': 576, 'num_enc_layers': 2, \
-    'num_dec_layers': 3, 'num_heads': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 5e-06, 'lr_decay': 0.9, \
-    'loss_type': 'smooth_l1', 'delta': 2.5, 'reg_var': 0.05, 'predict_res': True}
 
+    # Tuned result 2: random try 0.0021
+    # {'unet_num_layer': 3, 'unet_start_filts': 128, 'tmsa_window_shift_size': '24441222', 'tmsa_depth': 4, \
+    # 'noise_std': 0.01, 'window_size': 7, 'scaler_type': 'quantile', 'feature_size': 576, 'num_enc_layers': 2, \
+    # 'num_dec_layers': 3, 'num_heads': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 5e-06, 'lr_decay': 0.9, \
+    # 'loss_type': 'smooth_l1', 'delta': 2.5, 'reg_var': 0.05, 'predict_res': True}
+
+    # Tuned result 3: random try 0.0027
+    # {'unet_num_layer': 2, 'unet_start_filts': 128, 'tmsa_window_shift_size': '24441000', 'tmsa_depth': 6, \
+    # 'noise_std': 0.1, 'window_size': 6, 'scaler_type': 'quantile', 'feature_size': 720, 'num_enc_layers': 2, \
+    # 'num_dec_layers': 3, 'num_heads': 8, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-05, 'lr_decay': 0.9, \
+    # 'loss_type': 'huber', 'delta': 2.5, 'reg_var': 0.05, 'predict_res': True}
+    # GOOD BUT rollout tend to shrink down 
+
+    {'unet_num_layer': 4, 'unet_start_filts': 32, 'tmsa_window_shift_size': '24441000', 'tmsa_depth': 4, \
+    'noise_std': 0.15, 'window_size': 5, 'scaler_type': 'quantile', 'feature_size': 432, 'num_enc_layers': 1, \
+    'num_dec_layers': 4, 'num_heads': 8, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-05, 'lr_decay': 0.8, \
+    'loss_type': 'smooth_l1', 'delta': 1.5, 'reg_var': 0.05, 'predict_res': True}
+
+
+    #512 |     2.5 |       0.1 |            720 | huber       | 1e-05 |        0.8 |        0.15 |                4 |                3 |           4 | True          |     0.05  | quantile      |            4 |                 24441000 |                4 |                 32 |             7 |      1 |         183.059  |  0.00418879  |  0.0291284 |  0.278215 
     #Regular CONV
     #conv_config = {'num_layer':5, 'kernel_size':3, 'padding':1, 'padding_mode':'replicate', 'conv_type': 'regular'}
     #UNet CONV
 
+    {'unet_num_layer': 3, 'unet_start_filts': 128, 'tmsa_window_shift_size': '24441000', 'tmsa_depth': 6, 'noise_std': 0.15, 'window_size': 4, \
+    'scaler_type': 'standard', 'feature_size': 288, 'num_enc_layers': 1, 'num_dec_layers': 3, 'num_heads': 4, 'd_ff': 1024, 'dropout': 0.1, \
+    'lr': 0.001, 'lr_decay': 0.8, 'loss_type': 'smooth_l1', 'delta': 0.2, 'reg_var': 0.001, 'temporal_insert_layer': -1, 'decoder_only': False, 'tmsa_with_conv': False}
 
+    {'unet_num_layer': 3, 'unet_start_filts': 128, 'tmsa_window_shift_size': '24441222', 'tmsa_depth': 8, 'noise_std': 0.01, 'window_size': 4, \
+    'scaler_type': 'standard', 'feature_size': 576, 'num_enc_layers': 2, 'num_dec_layers': 5, 'num_heads': 4, 'd_ff': 1024, 'dropout': 0.2, \
+    'lr': 0.0001, 'lr_decay': 0.9, 'loss_type': 'smooth_l1', 'delta': 1.0, 'reg_var': 0.05, 'temporal_insert_layer': -2, 'decoder_only': True, 'tmsa_with_conv': True}
     
-    conv_config = {'num_layer':3, 'start_filts':128, 'conv_type': 'UNet'}
-    tmsa_config = {'use_tmsa':True, 'use_tgt_tmsa':True, 'window_patch_size': (2,4,4,4), 'shift_size': (1,2,2,2), 'depth': 4, 'num_heads':4}
-    data_config = {'scale': True, 'noise_std':0.001, 'window_size': 7, 'option': 'patch', 'predict_res': False, 'scaler_type':'quantile','patch_size': (4,4,4),}
-    best_config = {'epochs':30, 'pe_type': '3d_temporal', 'batch_size': 64, 'feature_size': 288*2, 'num_enc_layers': 2\
-                , 'num_dec_layers': 3, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 5e-6, 'lr_decay': 0.9, 'loss_type':'smooth_l1', 'delta': 2.5\
-                , 'mask_type':'patch','decoder_only':False, 'reg_var':0.05}
+    {'unet_num_layer': 4, 'unet_start_filts': 128, 'tmsa_window_shift_size': '24441000', 'tmsa_depth': 8, 'noise_std': 0.05, 'window_size': 5, \
+    'scaler_type': 'standard', 'feature_size': 288, 'num_enc_layers': 2, 'num_dec_layers': 4, 'num_heads': 8, 'd_ff': 1024, 'dropout': 0.1, \
+    'lr': 0.001, 'lr_decay': 0.8, 'loss_type': 'huber', 'delta': 0.1, 'reg_var': 0.01, 'temporal_insert_layer': -2, 'decoder_only': True, 'tmsa_with_conv': False}
+
+    {'epochs': 30, 'pe_type': '3d_temporal', 'batch_size': 1, 'feature_size': 864, 'num_enc_layers': 1, 'num_dec_layers': 4, 'temporal_insert_layer': 4, 'num_head': 8, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-05, 'lr_decay': 0.8, 'loss_type': 'l1', 'delta': 0.2, 'mask_type': 'patch', 'decoder_only': False, 'reg_var': 0.05}
+    {'scale': False, 'noise_std': 0.1, 'window_size': 5, 'option': 'patch', 'predict_res': False, 'scaler_type': 'standard', 'patch_size': (4, 4, 4)}
+    {'tmsa_with_conv': False, 'use_tmsa': True, 'use_tgt_tmsa': True, 'window_patch_size': (2, 4, 4, 4), 'shift_size': (1, 2, 2, 2), 'depth': 3, 'num_heads': 8}
+    {'num_layer': 4, 'start_filts': 32, 'conv_type': 'UNet'}
+
+
+    conv_config = {'num_layer':4, 'start_filts':32, 'conv_type': 'UNet'}
+    tmsa_config = {'tmsa_with_conv': False, 'use_tmsa':True, 'use_tgt_tmsa':True, 'window_patch_size': (2,2,2,2), 'shift_size': (1,0,0,0), 'depth': 6, 'num_heads':4}
+    data_config = {'scale': False, 'noise_std':0.0, 'window_size': 4, 'option': 'patch', 'predict_res': False, 'scaler_type':'standard','patch_size': (4,4,4),}
+    best_config = {'epochs':30, 'pe_type': '3d_temporal', 'batch_size': 1, 'feature_size': 288*4, 'num_enc_layers': 2\
+                , 'num_dec_layers': 4, 'temporal_insert_layer' : 3, 'num_head': 4, 'd_ff': 512, 'dropout': 0.2, 'lr': 1e-4, 'lr_decay': 0.8, 'loss_type':'smooth_l1', 'delta': 0.1\
+                , 'mask_type':'patch','decoder_only':False, 'reg_var':0.001}
     predict_res = True
  
     pe_type = best_config['pe_type']
@@ -275,6 +311,7 @@ if __name__ == "__main__":
     feature_size = best_config['feature_size']
     num_enc_layers = best_config['num_enc_layers']
     num_dec_layers = best_config['num_dec_layers']
+    temporal_insert_layer = best_config['temporal_insert_layer']
     d_ff = best_config['d_ff']
     num_head = best_config['num_head']
     dropout = best_config['dropout']
@@ -314,9 +351,9 @@ if __name__ == "__main__":
     best_config.update(data_config)
 
     ### SPECIFYING use_coords=True WILL RETURN DATALOADERS FOR COORDS
-    train_loader, test_loader, _, scaler, data = get_data_loaders(train_proportion, test_proportion, val_proportion,\
+    train_loader, test_loader, scaler, data = get_data_loaders(train_proportion, test_proportion, val_proportion,\
         pred_size = pred_size, batch_size = batch_size, num_workers = 1, pin_memory = False, use_coords = True, use_time = True,\
-        test_mode = False, scale = scale, window_size = window_size, patch_size = patch_size, option = option, predict_res = False,\
+        test_mode = True, scale = scale, window_size = window_size, patch_size = patch_size, option = option, predict_res = False,\
         noise_std = noise_std, scaler_type = scaler_type)
     
     model = Transformer(data, feature_size=feature_size,num_enc_layers=num_enc_layers,num_dec_layers = num_dec_layers,\
@@ -332,6 +369,17 @@ if __name__ == "__main__":
     print('Using device: ',device)
     model.to(device)
       
+
+    class MSLELoss(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.mse = nn.MSELoss()
+            self.epsilon = 1e-6
+            self.reg_log = 2
+            
+        def forward(self, pred, target):
+            return self.mse(pred,target) + self.reg_log * self.mse(torch.log(pred + self.epsilon), torch.log(target + self.epsilon))
+
     if loss_type == 'l1':
         criterion = nn.L1Loss()
     elif loss_type == 'l2':
@@ -340,12 +388,18 @@ if __name__ == "__main__":
         criterion = nn.HuberLoss(delta=delta)
     elif loss_type == 'smooth_l1':
         criterion = nn.SmoothL1Loss(beta=delta)
+
+    # criterion = MSLELoss()
+
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=lr_decay)
     #writer = tensorboard.SummaryWriter('/scratch/yd1008/tensorboard_output/')
-
-    time_map_indices = train_loader.dataset.time_map_indices
-
+    def loss_function(pred, target, reg_var):
+        _,_,_,_,C = pred.shape
+        loss = 0.
+        for c in range(C):
+            loss += criterion(pred[:,:,:,:,c], target[:,:,:,:,c]) + reg_var * torch.abs(torch.var(pred.detach()[:,:,:,:,c])-torch.var(target[:,:,:,:,c])).mean()
+        return loss
     epochs = best_config['epochs']
     train_losses = []
     test_losses = []
@@ -354,7 +408,8 @@ if __name__ == "__main__":
     Early_Stopping = early_stopping(patience=tolerance)
     counter_old = 0
     x1, x2, x3 = patch_size
-
+    g_cpu = torch.Generator()
+    seed = 1008
 
     if os.path.exists(root_dir+'/best_model.pth') and skip_training:
         model.load_state_dict(torch.load(root_dir+'/best_model.pth'))
@@ -367,29 +422,34 @@ if __name__ == "__main__":
             for i, ((src, tgt), (src_coord, tgt_coord), (src_ts, tgt_ts)) in enumerate(train_loader):
                 src, tgt, src_coord, tgt_coord, src_ts, tgt_ts = src.to(device), tgt.to(device), src_coord.to(device),\
                                                                             tgt_coord.to(device), src_ts.to(device), tgt_ts.to(device)
+                seed += 1
                 optimizer.zero_grad()
 
-                #dec_rollout = reduce(src.view(src.shape[0],window_size,patch_length,-1), 'b n p c -> b p c', 'mean')
-                # dec_rollout = torch.zeros((src.shape[0],patch_length,src.shape[2])).float().to(device)
+                # for shift_size in get_roll_strides(2): ### Add shift size as model input if uncommenting this
+                #     shift_size = (0,) + shift_size
+                    #dec_rollout = reduce(src.view(src.shape[0],window_size,patch_length,-1), 'b n p c -> b p c', 'mean')
+                dec_rollout = torch.zeros_like(src[:pred_size])
+                dec_in = torch.cat([src[pred_size:], dec_rollout], dim=0).float()
+                # dec_in = torch.cat([(tgt-src)[:-pred_size], dec_rollout], dim=0).float()
+
+                dec_in = dec_in + (torch.empty(tgt.shape).normal_(mean=0,std=noise_std,generator = g_cpu.manual_seed(seed))).to(device)
+                enc_in = src + (torch.empty(tgt.shape).normal_(mean=0,std=noise_std,generator = g_cpu.manual_seed(seed*100))).to(device)
+                output = model(enc_in, dec_in, src_coord, tgt_coord, src_ts, tgt_ts, temporal_insert_layer = temporal_insert_layer)
                 if predict_res:
-                    res = tgt - src
-                    res_rollout = torch.cat([res[:,:-patch_length,:],res[:,-patch_length*2:-patch_length,:]],dim=1)  + (torch.empty(tgt.shape).normal_(mean=0,std=noise_std)).to(device)###repeat the second to the last patch of residuals
-                    output = model(src,res_rollout,src_coord,tgt_coord,src_ts,tgt_ts, time_map_indices)
-                    output = output + src
+                    res = tgt-src
+                    #loss = criterion(output[-pred_size:,:,:,:,:], res[-pred_size:,:,:,:,:]) + reg_var*torch.abs((torch.var(res.detach(),(0,-1))-torch.var(output,(0,-1)))).mean()
+                    loss = loss_function(output, res, reg_var)
                 else:
-                    dec_rollout = src[:,-patch_length:,:]
-                    dec_in = torch.cat([src[:,patch_length:,:], dec_rollout], dim=1).float()
-                    dec_in = dec_in + (torch.empty(tgt.shape).normal_(mean=0,std=noise_std)).to(device)
-                    output = model(src, dec_in, src_coord, tgt_coord, src_ts, tgt_ts, time_map_indices)
-                loss = criterion(output[:,-x1*x2*x3:,:], tgt[:,-x1*x2*x3:,:]) + reg_var*torch.abs((torch.var(tgt[:,-x1*x2*x3:,:].detach(),1)-torch.var(output[:,-x1*x2*x3:,:],1))).mean()
+                    loss = criterion(output, tgt) + reg_var*torch.abs((torch.var(tgt.detach(),0)-torch.var(output,0))).mean()
                 # loss = criterion(output, tgt)
                 total_loss += loss.item()
                 loss.backward()
                 optimizer.step()
 
-            avg_train_loss = total_loss*batch_size/len(train_loader.dataset)
-            total_test_loss = evaluate(model, test_loader, criterion, patch_size=patch_size, predict_res = predict_res, time_map_indices = time_map_indices)
-            avg_test_loss = total_test_loss/len(test_loader.dataset)
+            avg_train_loss = total_loss*batch_size/len(train_loader)
+            print('Evaluation Started')
+            total_test_loss = evaluate(model, test_loader, criterion, patch_size=patch_size, predict_res = predict_res)
+            avg_test_loss = total_test_loss/len(test_loader)
 
             
             train_losses.append(avg_train_loss)
@@ -397,14 +457,17 @@ if __name__ == "__main__":
             
 
             if epoch==1: ###DEBUG
-                print(f'Total of {len(train_loader.dataset)} samples in training set and {len(test_loader.dataset)} samples in test set', flush=True)
+                print(f'Total of {len(train_loader)} samples in training set and {len(test_loader)} samples in test set', flush=True)
 
-            print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, test_loss: {avg_test_loss}, lr: {scheduler.get_last_lr()}, training time: {time.time()-start_time} s', flush=True)
-
-            if (epoch%2 == 0):
+            if (epoch%4 == 0):
                 print(f'Saving prediction for epoch {epoch}', flush=True)
+                eval_start_time = time.time()
                 predict_model(model, test_loader, epoch, config=best_config,\
-                                    plot=True, plot_range=[0,0.5], final_prediction=False, predict_res = predict_res, time_map_indices = time_map_indices, file_prefix = 'test')   
+                                    plot=True, plot_range=[0,0.5], final_prediction=False, predict_res = predict_res, file_prefix = 'test')  
+                print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, test_loss: {avg_test_loss}, lr: {scheduler.get_last_lr()}, training time: {time.time()-start_time} s, evaluation time: {time.time()-eval_start_time}', flush=True)
+ 
+            else:
+                print(f'Epoch: {epoch}, train_loss: {avg_train_loss}, test_loss: {avg_test_loss}, lr: {scheduler.get_last_lr()}, training time: {time.time()-start_time} s', flush=True)
 
 
             Early_Stopping(model, avg_test_loss)
@@ -439,7 +502,7 @@ if __name__ == "__main__":
         print('-'*20 + f'Saving prediction results for {file_prefix}' + '-'*20, flush=True)
         start_time = time.time()
         final_result = predict_model(model, dataloader,  epoch, config=best_config,\
-                                                plot=True, plot_range=[0,1], final_prediction=True, predict_res = predict_res, time_map_indices = time_map_indices, file_prefix = file_prefix)
+                                                plot=True, plot_range=[0,1], final_prediction=True, predict_res = predict_res, file_prefix = file_prefix)
         prediction = final_result['prediction']
         print('-'*20 + ' Measure for Simulation Speed ' + '-'*20, flush=True)
         print(f'Time to forcast on {len(prediction)} samples: {time.time()-start_time} s', flush=True)
@@ -480,5 +543,5 @@ if __name__ == "__main__":
                             pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
                             plot_anime = True, img_dir = img_dir, config=best_config, file_prefix=file_prefix) 
     
-    save_pred(train_loader, 'train')
+    # save_pred(train_loader, 'train')
     save_pred(test_loader, 'test')

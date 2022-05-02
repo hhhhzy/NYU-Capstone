@@ -64,11 +64,13 @@ def compute_mask(N, D, H, W, window_patch_size, shift_size, device):
     img_mask = torch.zeros((N, D, H, W, 1), device=device)  # 1 Dp Hp Wp 1
     cnt = 0
     for n in slice(-window_patch_size[0]), slice(-window_patch_size[0], -shift_size[0]), slice(-shift_size[0], None):
-        for d in slice(-window_patch_size[1]), slice(-window_patch_size[1], -shift_size[0]), slice(-shift_size[1], None):
-            for h in slice(-window_patch_size[2]), slice(-window_patch_size[2], -shift_size[1]), slice(-shift_size[2], None):
-                for w in slice(-window_patch_size[3]), slice(-window_patch_size[3], -shift_size[2]), slice(-shift_size[3], None):
-                    img_mask[n, d, h, w, :] = cnt
-                    cnt += 1
+        img_mask[n, :, :, :, :] = cnt
+        cnt += 1
+        # for d in slice(-window_patch_size[1]), slice(-window_patch_size[1], -shift_size[0]), slice(-shift_size[1], None):
+        #     for h in slice(-window_patch_size[2]), slice(-window_patch_size[2], -shift_size[1]), slice(-shift_size[2], None):
+        #         for w in slice(-window_patch_size[3]), slice(-window_patch_size[3], -shift_size[2]), slice(-shift_size[3], None):
+        #             img_mask[n, d, h, w, :] = cnt
+        #             cnt += 1
     #print(img_mask.squeeze(-1))
     mask_windows = window_partition(img_mask, window_patch_size)  # nW, ws[0]*ws[1]*ws[2], 1
     mask_windows = mask_windows.squeeze(-1)  # nW, ws[0]*ws[1]*ws[2]

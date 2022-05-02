@@ -9,16 +9,17 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib import patches
 from _arfima import arfima
-from utils import *
 from athena_read import *
 from sklearn.preprocessing import StandardScaler, PowerTransformer, RobustScaler, QuantileTransformer
+from sklearn.metrics import mean_absolute_error, mean_squared_error, explained_variance_score, r2_score
+
 ### VARIABLES(KEYS) IN DATASET
 # dict_keys(['Coordinates', 'DatasetNames', 'MaxLevel', 'MeshBlockSize', 'NumCycles', \
 # 'NumMeshBlocks', 'NumVariables', 'RootGridSize', 'RootGridX1', 'RootGridX2', 'RootGridX3', \
 # 'Time', 'VariableNames', 'x1f', 'x1v', 'x2f', 'x2v', 'x3f', 'x3v', 'rho', 'press', 'vel1', 'vel2', 'vel3'])
-def get_rho(data_path, predict_res = False, noise_std = 0.01):
+def get_rho(data_path, predict_res = False, noise_std = 0.01, var_name = 'rho'):
     np.random.seed(1008)
-    lst = sorted(os.listdir(data_path))[4:]
+    lst = sorted(os.listdir(data_path))[4:-1]
     rho = []
     coords = []
     timestamps = []
@@ -29,8 +30,8 @@ def get_rho(data_path, predict_res = False, noise_std = 0.01):
         nx2 = len(d['x2v'])
         nx3 = len(d['x3v'])
         coord = np.transpose(np.array(np.meshgrid(np.arange(nx1),np.arange(nx2),np.arange(nx3))), axes=[2,1,3,0]).reshape(-1,3)
-        rho.append(d['rho'])
-        timestamp_repeated = [d['Time']]*(np.prod(d['rho'].shape))
+        rho.append(d[var_name])
+        timestamp_repeated = [d['Time']]*(np.prod(d[var_name].shape))
         timestamps.extend(timestamp_repeated) 
         coords.extend(coord)
         #print(f"Name: {name}, keys: {d.keys()}", flush=True)#x1v: {d['x1v']}, x2v: {d['x2v']}, x3v:{d['x3v']}
@@ -38,7 +39,6 @@ def get_rho(data_path, predict_res = False, noise_std = 0.01):
     rho = np.array(rho)
     meshed_blocks = (nx1, nx2, nx3)
     timestamps = np.array(timestamps)
-    time_map_indices = {t:i for i,t in enumerate(np.unique(timestamps))}
     coords = np.array(coords)
     rho_original = rho.flatten()
     #rho_original = rho_original + np.random.normal(0,noise_std,len(rho_original))
@@ -49,172 +49,209 @@ def get_rho(data_path, predict_res = False, noise_std = 0.01):
         timestamps = timestamps[nx1*nx2*nx3:]
         coords = coords[nx1*nx2*nx3:]
         #rho_original = rho_original[:-nx1*nx2*nx3] ### to reconstruct truth from residuals, take the first meshblock of rho_original and add the residuals.
-        return rho_original[nx1*nx2*nx3:], rho_residual, meshed_blocks, coords, timestamps, time_map_indices
+        return rho_original[nx1*nx2*nx3:], rho_residual, meshed_blocks, coords, timestamps
     else: 
-        return rho_original, meshed_blocks, coords, timestamps, time_map_indices
+        return rho_original, meshed_blocks, coords, timestamps
     # print(f'rho shape: {rho_original.shape}, coords shape: {coords.shape}')
     # return rho_original, rho_residual, meshed_blocks, coords, timestamps
 
 
-def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16), option='patch', patch_stride = (1,1,1)):
-    """
-    window_size: Here represents the number of time steps in each window
-    patch_size: (x1,x2,x3), determines the shape of the cuboid patch
-    patch_stride: (s1,s2,s3), how many number of values patches move around in each meshblock in x,y,z direction
-    """
-    out = []
-    if option == 'space':
-        length = len(data) - window_size
-        for i in range(length):
-            feature = np.array(data[i:i+(window_size)])
-            target = np.array(data[i+pred_size:i+window_size+pred_size])
-            out.append((feature, target))
-        patches_per_block = None 
+# def to_windowed(data, meshed_blocks, pred_size, window_size , patch_size=(1,1,16), option='patch', patch_stride = (1,1,1)):
+#     """
+#     window_size: Here represents the number of time steps in each window
+#     patch_size: (x1,x2,x3), determines the shape of the cuboid patch
+#     patch_stride: (s1,s2,s3), how many number of values patches move around in each meshblock in x,y,z direction
+#     """
+#     out = []
+#     if option == 'space':
+#         length = len(data) - window_size
+#         for i in range(length):
+#             feature = np.array(data[i:i+(window_size)])
+#             target = np.array(data[i+pred_size:i+window_size+pred_size])
+#             out.append((feature, target))
+#         patches_per_block = None 
 
-    elif option == 'time':
-        nx1, nx2, nx3 = meshed_blocks
-        length = len(data)-nx1*nx2*nx3*window_size
-        for i in range(length):
-            feature  = np.array(data[[i+nx1*nx2*nx3*k for k in range(window_size)]])
-            target = np.array(data[[i+nx1*nx2*nx3*(k+pred_size) for k in range(window_size)]])        
-            out.append((feature,target))
-        patches_per_block = None 
+#     elif option == 'time':
+#         nx1, nx2, nx3 = meshed_blocks
+#         length = len(data)-nx1*nx2*nx3*window_size
+#         for i in range(length):
+#             feature  = np.array(data[[i+nx1*nx2*nx3*k for k in range(window_size)]])
+#             target = np.array(data[[i+nx1*nx2*nx3*(k+pred_size) for k in range(window_size)]])        
+#             out.append((feature,target))
+#         patches_per_block = None 
 
-    elif option == 'patch':
-        x1, x2, x3 = patch_size
-        nx1, nx2, nx3 = meshed_blocks
+#     elif option == 'patch':
+#         x1, x2, x3 = patch_size
+#         nx1, nx2, nx3 = meshed_blocks
 
-        vertices = []
-        for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
-            for i in range(nx1//x1):
-                for j in range(nx2//x2):
-                    for k in range(nx3//x3):
-                        vertices.append(t*nx1*nx2*nx3 + i*x1*nx2*nx3 + j*x2*nx3 + k*x3)
+#         vertices = []
+#         for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
+#             for i in range(nx1//x1):
+#                 for j in range(nx2//x2):
+#                     for k in range(nx3//x3):
+#                         vertices.append(t*nx1*nx2*nx3 + i*x1*nx2*nx3 + j*x2*nx3 + k*x3)
 
-        for i in vertices:
-            feature  = np.array(data[[i + time*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
-                                for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])
-            target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
-                                for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])  
-            out.append((feature,target))
-        patches_per_block = np.prod([nx1//x1,nx2//x2,nx3//x3])
+#         for i in vertices:
+#             feature  = np.array(data[[i + time*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
+#                                 for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])
+#             target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + j*(nx2*nx3) + k*(nx3) + l \
+#                                 for time in range(window_size-pred_size+1) for j in range(x1) for k in range(x2) for l in range(x3)]])  
+#             out.append((feature,target))
+#         patches_per_block = np.prod([nx1//x1,nx2//x2,nx3//x3])
         
-    elif option == 'patch_overlap':
-        x1, x2, x3 = patch_size
-        nx1, nx2, nx3 = meshed_blocks
-        stride_x, stride_y, stride_z = patch_stride
-        vertices = []
-        for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
-            for k in range(math.floor((nx3-x3)/stride_z+1)):
-                for j in range(math.floor((nx2-x2)/stride_y+1)):
-                    for i in range(math.floor((nx1-x1)/stride_x+1)):
-                        vertices.append(t*nx1*nx2*nx3 + k*nx1*nx2 + j*nx1 + i)
-        for i in vertices:
-            feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
-                                for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])
-            target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
-                                for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])      
-            out.append((feature,target))
-        patches_per_block = np.prod([nx1-x1+1,nx2-x2+1,nx3-x3+1])
+#     elif option == 'patch_overlap':
+#         x1, x2, x3 = patch_size
+#         nx1, nx2, nx3 = meshed_blocks
+#         stride_x, stride_y, stride_z = patch_stride
+#         vertices = []
+#         for t in range(int((len(data)-nx1*nx2*nx3*window_size)/(nx1*nx2*nx3))):
+#             for k in range(math.floor((nx3-x3)/stride_z+1)):
+#                 for j in range(math.floor((nx2-x2)/stride_y+1)):
+#                     for i in range(math.floor((nx1-x1)/stride_x+1)):
+#                         vertices.append(t*nx1*nx2*nx3 + k*nx1*nx2 + j*nx1 + i)
+#         for i in vertices:
+#             feature  = np.array(data[[i + time*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
+#                                 for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])
+#             target  = np.array(data[[i + (time+pred_size)*nx1*nx2*nx3 + l*(nx2*nx3) + k*(nx3) + j \
+#                                 for time in range(window_size) for j in range(x1) for k in range(x2) for l in range(x3)]])      
+#             out.append((feature,target))
+#         patches_per_block = np.prod([nx1-x1+1,nx2-x2+1,nx3-x3+1])
             
-    return np.array(out), patches_per_block
+#     return np.array(out), patches_per_block
+
+def to_windowed(x, block_size, window_size, feature_size):
+    nx1, nx2, nx3 = block_size
+    x = torch.Tensor(x) #make sure its a float tensor
+    x = x.view(-1,nx1,nx2,nx3,feature_size)
+    x_windowed = x.unfold(0,window_size,1).permute(0,5,1,2,3,4)
+    return x_windowed
+
+# def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
+#               , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch', scaler_type='standard'):
+    
+#     if scale == True:
+#         if scaler_type not in ['standard','power_box','power_yeo','robust']:
+#             scaler_type = 'standard'
+#         if scaler_type == 'standard':
+#             scaler = StandardScaler()
+#         elif scaler_type == 'power_box':
+#             scaler = PowerTransformer(method='box-cox',standardize=True)
+#         elif scaler_type == 'power_yeo':
+#             scaler = PowerTransformer(method='yeo-johnson',standardize=True)
+#         elif scaler_type == 'robust':
+#             scaler = RobustScaler(with_centering=False,with_scaling=True,quantile_range=(25.0, 75.0),copy=True,unit_variance=False)
+#         elif scaler_type == 'quantile':
+#             scaler = QuantileTransformer(output_distribution='normal')
+#         print(f'Using scaler: {scaler_type}')
+#         data = scaler.fit_transform(data.reshape(-1, 1)).reshape(-1)
+#     if option in ['patch','patch_overlap']: ### Force each set start on a new block
+#         windows, patches_per_block = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
+#         total_num_blocks = int(len(data)/np.prod(meshed_blocks)) #-(window_size-1)-(pred_size)
+#         window_adjust_length = (window_size-1)+pred_size ###Move the sliding window to cover the data lost on the edges
+
+#         train_num_blocks = int(total_num_blocks*train_proportion)-window_adjust_length
+#         val_num_blocks = int(total_num_blocks*val_proportion)
+
+#         val_start_block = train_num_blocks
+
+#         train_data_size = train_num_blocks*patches_per_block
+#         val_data_size = val_num_blocks*patches_per_block
+
+#         val_start_index = val_start_block*patches_per_block
+
+#         train = windows[:train_data_size]
+#         val = windows[val_start_index:val_start_index+val_data_size]
+#         test = windows[val_start_index+val_data_size:]
+  
+#     else:
+#         windows = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
+
+#         total_len = len(windows)
+#         train_len = int(total_len*train_proportion)
+#         val_len = int(total_len*val_proportion)
+        
+#         train = windows[0:train_len]
+#         val = windows[train_len:(train_len+val_len)]
+#         test = windows[(train_len+val_len):]
+#     print(train.shape,val.shape,test.shape)
+#     train_data = torch.from_numpy(train).float()
+#     val_data = torch.from_numpy(val).float()
+#     test_data = torch.from_numpy(test).float()
+    
+#     return train_data,val_data,test_data,scaler
 
 def train_test_val_split(data, meshed_blocks, train_proportion = 0.6, val_proportion = 0.2, test_proportion = 0.2\
-              , pred_size = 1, scale = False, window_size = 10, patch_size=(1,1,16), option='patch', scaler_type='standard'):
-    if scaler_type not in ['standard','power_box','power_yeo','robust']:
-        scaler_type = 'standard'
-    if scaler_type == 'standard':
-        scaler = StandardScaler()
-    elif scaler_type == 'power_box':
-        scaler = PowerTransformer(method='box-cox',standardize=True)
-    elif scaler_type == 'power_yeo':
-        scaler = PowerTransformer(method='yeo-johnson',standardize=True)
-    elif scaler_type == 'robust':
-        scaler = RobustScaler(with_centering=False,with_scaling=True,quantile_range=(25.0, 75.0),copy=True,unit_variance=False)
-    elif scaler_type == 'quantile':
-        scaler = QuantileTransformer(output_distribution='normal')
-    print(f'Using scaler: {scaler_type}')
+              , pred_size = 1, feature_size = 5, scale = False, window_size = 10, patch_size=(1,1,16), option='patch', scaler_type='standard'):
     
     if scale == True:
-        data = scaler.fit_transform(data.reshape(-1, 1)).reshape(-1)
-    if option in ['patch','patch_overlap']: ### Force each set start on a new block
-        windows, patches_per_block = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
-        total_num_blocks = int(len(data)/np.prod(meshed_blocks)) #-(window_size-1)-(pred_size)
-        window_adjust_length = (window_size-1)+pred_size ###Move the sliding window to cover the data lost on the edges
-
-        train_num_blocks = int(total_num_blocks*train_proportion)-window_adjust_length
-        val_num_blocks = int(total_num_blocks*val_proportion)
-
-        val_start_block = train_num_blocks
-
-        train_data_size = train_num_blocks*patches_per_block
-        val_data_size = val_num_blocks*patches_per_block
-
-        val_start_index = val_start_block*patches_per_block
-
-        train = windows[:train_data_size]
-        val = windows[val_start_index:val_start_index+val_data_size]
-        test = windows[val_start_index+val_data_size:]
-        # if option == 'patch_overlap': ###Retain the non-overlap test set in patch mode
-        #     test = train_test_val_split(data, meshed_blocks, train_proportion, val_proportion, test_proportion, pred_size, scale, window_size, patch_size, option='patch')[2]
-        #     test = test.numpy() ###Might not be efficient...
-        # else: 
-        #     test = windows[val_start_index+val_data_size:]
+        if scaler_type not in ['standard','power_box','power_yeo','robust']:
+            scaler_type = 'standard'
+        if scaler_type == 'standard':
+            scaler = StandardScaler()
+        elif scaler_type == 'power_box':
+            scaler = PowerTransformer(method='box-cox',standardize=True)
+        elif scaler_type == 'power_yeo':
+            scaler = PowerTransformer(method='yeo-johnson',standardize=True)
+        elif scaler_type == 'robust':
+            scaler = RobustScaler(with_centering=False,with_scaling=True,quantile_range=(25.0, 75.0),copy=True,unit_variance=False)
+        elif scaler_type == 'quantile':
+            scaler = QuantileTransformer(output_distribution='normal')
+        print(f'Using scaler: {scaler_type}')
+        data = scaler.fit_transform(data)
     else:
-        windows = to_windowed(data, meshed_blocks, pred_size, window_size, patch_size, option)
+        scaler = None
+    
+    data_windowed = to_windowed(data, meshed_blocks, window_size, feature_size) #already float tensors
 
-        total_len = len(windows)
-        train_len = int(total_len*train_proportion)
-        val_len = int(total_len*val_proportion)
-        
-        train = windows[0:train_len]
-        val = windows[train_len:(train_len+val_len)]
-        test = windows[(train_len+val_len):]
-    print(train.shape,val.shape,test.shape)
-    train_data = torch.from_numpy(train).float()
-    val_data = torch.from_numpy(val).float()
-    test_data = torch.from_numpy(test).float()
+    total_len = data_windowed.shape[0]
+    train_len = int(total_len*train_proportion)
+    val_len = int(total_len*val_proportion)
+    train_data = data_windowed[0:train_len]
+    val_data = data_windowed[train_len:(train_len+val_len)]
+    test_data = data_windowed[(train_len+val_len):]
     
     return train_data,val_data,test_data,scaler
-    
 
 
 ## Adjust __init__ to fit the inputs
 class CustomDataset(torch.utils.data.Dataset):
-    def __init__(self,x,coords,timestamp,data,grid_size,time_map_indices,window_size):
+    def __init__(self,x,coords,timestamp,data,grid_size,window_size):
         self.x=x
         self.coords=coords
         self.timestamp=timestamp
         self.data = data
         self.window_size = window_size
-        self.time_map_indices = time_map_indices
         self.grid_dim = np.prod([d for d in grid_size])
  
     def __len__(self):
-        return len(self.x)
- 
+        return self.x.shape[0]
+
     def __getitem__(self,idx):
-        src_timestamp, tgt_timestamp = self.timestamp[idx][0], self.timestamp[idx][1]
-        src_coords, tgt_coords = self.coords[idx][0], self.coords[idx][1]
-        src_x, tgt_x = self.x[idx][0], self.x[idx][1]
-        # prev_block_endtime_index = self.time_map_indices[src_timestamp.max().item()] #Find the largest time index in src
-        return( (src_x.view(-1,1), tgt_x.view(-1,1)),\
+        src_timestamp, tgt_timestamp = self.timestamp[idx], self.timestamp[idx+1]
+        src_coords, tgt_coords = self.coords[idx], self.coords[idx+1]
+        src_x, tgt_x = self.x[idx], self.x[idx+1]
+        return( (src_x, tgt_x),\
                 (src_coords, tgt_coords),\
-                (src_timestamp.view(-1,1), tgt_timestamp.view(-1,1)) )
-                # self.data[(prev_block_endtime_index-self.window_size+1)*self.grid_dim:(prev_block_endtime_index+1)*self.grid_dim] ) #return blocks before current timestep
-    
+                (src_timestamp, tgt_timestamp) )
+
 
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
                         use_coords = True, use_time = True, test_mode = False, scale = False, \
                         window_size = 10, patch_size=(1,1,16), grid_size=(16,16,16), option='patch', predict_res=False, noise_std=0.01, scaler_type='standard'): 
-    np.random.seed(505)
+    np.random.seed(1008)
     
     data_path='/scratch/yd1008/nyu-capstone/data_turb_dedt1_16'
     if predict_res:
-        data_original, data, meshed_blocks, coords, timestamps, time_map_indices = get_rho(data_path, predict_res=predict_res, noise_std =noise_std) 
+        data_original, data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res, noise_std =noise_std, var_name='rho')
     else:
-        data, meshed_blocks, coords, timestamps, time_map_indices = get_rho(data_path, predict_res=predict_res, noise_std=noise_std) 
+        density, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res, noise_std=noise_std, var_name='rho') 
+        vel1, _, _, _ = get_rho(data_path, predict_res=predict_res, noise_std=noise_std, var_name='vel1') 
+        vel2, _, _, _ = get_rho(data_path, predict_res=predict_res, noise_std=noise_std, var_name='vel2') 
+        vel3, _, _, _ = get_rho(data_path, predict_res=predict_res, noise_std=noise_std, var_name='vel3') 
+        press, _, _, _ = get_rho(data_path, predict_res=predict_res, noise_std=noise_std, var_name='press') 
+        data = np.stack((density, vel1, vel2, vel3, press), axis=-1)
+        print(f'data shape: {data.shape}')
 
 
     ###FOR SIMPLE TEST SINE AND COSINE 
@@ -227,8 +264,8 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         train_coords,val_coords,test_coords, _ = train_test_val_split(\
             coords, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
-        print(f'train_coords: {train_coords.shape}')
+            , pred_size = pred_size, feature_size = 3,scale = False, window_size = window_size, patch_size = patch_size, option = option)
+        print(f'train_coords: {train_coords.shape}, val_coords: {val_coords.shape}, test_coords: {test_coords.shape}')
 
 
     if use_time:
@@ -236,15 +273,15 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
         train_timestamps,val_timestamps,test_timestamps, _ = train_test_val_split(\
             timestamps, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
             , val_proportion = val_proportion, test_proportion = test_proportion\
-            , pred_size = pred_size, scale = False, window_size = window_size, patch_size = patch_size, option = option)
-        print(f'train_timestamps: {train_timestamps.shape}')
+            , pred_size = pred_size, feature_size = 1 ,scale = False, window_size = window_size, patch_size = patch_size, option = option)
+        print(f'train_timestamps: {train_timestamps.shape}, val_timestamps: {val_timestamps.shape}, test_timestamps: {test_timestamps.shape}')
 
     print('-'*20,'split for data')
     train_data,val_data,test_data, scaler = train_test_val_split(\
         data, meshed_blocks = meshed_blocks, train_proportion = train_proportion\
         , val_proportion = val_proportion, test_proportion = test_proportion\
-        , pred_size = pred_size, scale = scale, window_size = window_size, patch_size = patch_size, option = option, scaler_type = scaler_type)
-    print(f'train_data: {train_data.shape}')
+        , pred_size = pred_size, feature_size = 5,scale = scale, window_size = window_size, patch_size = patch_size, option = option, scaler_type = scaler_type)
+    print(f'train_data: {train_data.shape}, val_data: {val_data.shape}, test_data: {test_data.shape}')
 
 #----------------------------------------------------------------
 ### Save the original data table for reconstructing from residual predictions. May need to be optimized?
@@ -270,19 +307,19 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
 
         ### Get the first block in test_original to perform rollout that gives back the original data based on predicted residuals
 
-        dataset_train_val, dataset_test = CustomDataset(train_val_data,train_val_coords,train_val_timestamps,data,grid_size,time_map_indices,window_size)\
-                                    , CustomDataset(test_data,test_coords,test_timestamps,data,grid_size,time_map_indices,window_size)
+        dataset_train_val, dataset_test = CustomDataset(train_val_data,train_val_coords,train_val_timestamps,data,grid_size,window_size)\
+                                    , CustomDataset(test_data,test_coords,test_timestamps,data,grid_size,window_size)
         train_val_loader = torch.utils.data.DataLoader(dataset_train_val, batch_size=batch_size, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                         persistent_workers=True, prefetch_factor = 16)
         test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size, \
                                         drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                         persistent_workers=True, prefetch_factor = 16) 
-        return train_val_loader, test_loader, scaler, torch.from_numpy(data).float()
+        return dataset_train_val, dataset_test, scaler, torch.from_numpy(data).float()
     if not test_mode:                           
-        dataset_train, dataset_test, dataset_val = CustomDataset(train_data,train_coords,train_timestamps,data,grid_size,time_map_indices,window_size)\
-                                                ,CustomDataset(test_data,test_coords,test_timestamps,data,grid_size,time_map_indices,window_size)\
-                                                , CustomDataset(val_data,val_coords,val_timestamps,data,grid_size,time_map_indices,window_size)
+        dataset_train, dataset_test, dataset_val = CustomDataset(train_data,train_coords,train_timestamps,data,grid_size,window_size)\
+                                                ,CustomDataset(test_data,test_coords,test_timestamps,data,grid_size,window_size)\
+                                                , CustomDataset(val_data,val_coords,val_timestamps,data,grid_size,window_size)
 
         train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, \
                                             drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
@@ -294,7 +331,7 @@ def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proport
                                             drop_last=False, num_workers=num_workers, pin_memory=pin_memory,\
                                             persistent_workers=True, prefetch_factor = 16)
        
-        return train_loader,val_loader, test_loader, scaler, torch.from_numpy(data).float()
+        return dataset_train,dataset_val, dataset_test, scaler, torch.from_numpy(data).float()
 
 # img_dir = 'figs' ###dir to save images to
 # pred_df = pd.read_csv('transformer_prediction_coords.csv',index_col=0) ###dir of csv file, or pandas dataframe
@@ -338,16 +375,16 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
                         pred_colname=pred_colname,truth_colname=truth_colname, time_colname=time_colname,  \
                         plot_anime = True, img_dir = 'figs/', config=best_config)   
     '''
-    if type(grid_size)==int:
+    if len(grid_size)!=3:
         grid_size = [grid_size]*3
     if type(pred_df)== str:
         preds_all = pd.read_csv(pred_df,index_col=None)
     else:
         preds_all = pred_df
-
+    print(grid_size)
     v_max, v_min = max(preds_all[truth_colname].values),min(preds_all[truth_colname].values)
     v_max_res, v_min_res = max(preds_all[truth_colname].values-preds_all[pred_colname].values),min(preds_all[truth_colname].values-preds_all[pred_colname].values)
-
+    print(v_max,v_min)
     predictions_per_simulation = np.prod(grid_size)
     slice_axis_colname = axis_colnames[slice_axis_index]
     #nonslice_axis_colname = axis_colnames.remove(slice_axis_colname)
@@ -359,7 +396,7 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
 
     ### create a dict to save all values
     result_dict = {}
-    print('Processing dataframe...', flush=True)
+    print('Processing dataframe...')
     for timestamp in timestamps:
         single_simulation_df = preds_all.loc[(preds_all[time_colname]==timestamp)]
         if single_simulation_df.shape[0]>=predictions_per_simulation:
@@ -375,12 +412,18 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
                 slice_truth = slice_df[truth_colname].values.reshape(nonslice_axis_shape)
                 result_dict[timestamp]['slice_axis_val'].append(axis_val)
                 result_dict[timestamp]['preds'].append(slice_preds)
-                result_dict[timestamp]['truth'].append(slice_truth)    
+                result_dict[timestamp]['truth'].append(slice_truth)  
+            for item in result_dict[timestamp]:
+                result_dict[timestamp][item] = np.array(result_dict[timestamp][item])
         else:
             print(f'Found {single_simulation_df.shape[0]} predictions in simulation at timestamp {timestamp}, but expect {predictions_per_simulation}')
 
-    print('Generating plots...', flush=True)
-    ### plot for each timestamp        
+    print('Generating plots...')
+    ### plot for each timestamp   
+    r2s = []
+    mses = []
+    maes = []
+    evs = []
     for ts_idx,ts in enumerate(list(result_dict.keys())):
         fig,axes = plt.subplots(nrows = slice_axis_shape, ncols = 3, figsize=(40, 40),subplot_kw={'xticks': [], 'yticks': []})
         #plt.setp(axes, ylim=(0, 14),xlim=(0,2))
@@ -388,6 +431,14 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         axis_val = result_dict[ts]['slice_axis_val']
         preds = result_dict[ts]['preds']
         truth = result_dict[ts]['truth']
+        
+        r2s.append(r2_score(truth.flatten(),preds.flatten()))
+        mses.append(mean_squared_error(truth.flatten(),preds.flatten()))
+        maes.append(mean_absolute_error(truth.flatten(),preds.flatten()))
+        evs.append(explained_variance_score(truth.flatten(),preds.flatten()))
+        
+        v_min = np.min(truth)
+        v_max = np.max(truth)
         for i in range(slice_axis_shape):
             if ts_idx==0:
                 im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
@@ -413,8 +464,16 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         axes[-1,2].annotate('Residual',(0.5, 0), xytext=(0, -30),textcoords='offset points', xycoords='axes fraction', ha='center', va='top', size=20)
         #axes[-1,0].annotate('Slice number', (0, 0.5), xytext=(-50, 0), textcoords='offset points', xycoords='axes fraction', ha='left', va='center', size=15, rotation=90)
         fig.suptitle(f'Forecasts on slices across {slice_axis_colname} at timestamp {ts}',x=0.2,y=1,size=20)
-        plt.savefig(img_dir+f'/{file_prefix}_ts_{ts}_result.png', bbox_inches="tight")
+        plt.savefig(img_dir+f'/{file_prefix}_ts_{ts}_result_across_{slice_axis_colname}.png', bbox_inches="tight", facecolor='white')
         plt.close()
+        ###plot r2:
+    plt.plot(np.arange(len(list(result_dict.keys()))),mses,label='MSE')
+    plt.plot(np.arange(len(list(result_dict.keys()))),maes,label='MAE')
+    plt.plot(np.arange(len(list(result_dict.keys()))),r2s,label='R2')
+    plt.plot(np.arange(len(list(result_dict.keys()))),evs,label='Explained Variance')
+    plt.legend()
+    plt.savefig(img_dir+f'{file_prefix}_metrics_rollout.png')
+    plt.close()
         
     if plot_anime:
         imgs = []
@@ -426,6 +485,11 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
             preds = result_dict[ts]['preds']
             truth = result_dict[ts]['truth']
             tmp_imgs = []
+            try:
+                v_max = max(truth)
+                v_min = min(truth)
+            except:
+                pass
             for i in range(slice_axis_shape):
                 if ts_idx==0:
                     im_pred = axes[slice_axis_shape-i-1][0].imshow(preds[i],vmin=v_min, vmax=v_max, aspect='equal',animated=False)
@@ -450,7 +514,8 @@ def plot_forecast(pred_df=None, grid_size=16, axis_colnames=['x1','x2','x3'], sl
         except:
             print('Saving animation in .mp4 format, try installing ffmpeg package. \n Saving to .gif instead')
             ani.save(img_dir+"/gif"+f"/{file_prefix}_{slice_axis_colname}_pe{config['pe_type']}_batch{config['batch_size']}_window{config['window_size']}_patch{config['patch_size']}.gif")
-
+        plt.close()
+        
 def plot_demo(num_timestamps, grid_size, patch_size, img_dir):
     '''
     Parameters:
