@@ -23,7 +23,7 @@ def get_rho(data_path, predict_res = False, noise_std = 0.01, var_name = 'rho'):
     rho = []
     coords = []
     timestamps = []
-    for name in lst[:20]:
+    for name in lst:
         path = data_path+'/'+name
         d = athdf(path)
         nx1 = len(d['x1v'])
