@@ -23,7 +23,7 @@ def get_rho(data_path, predict_res = False, noise_std = 0.01, var_name = 'rho'):
     rho = []
     coords = []
     timestamps = []
-    for name in lst:
+    for name in lst[:20]:
         path = data_path+'/'+name
         d = athdf(path)
         nx1 = len(d['x1v'])
@@ -238,10 +238,13 @@ class CustomDataset(torch.utils.data.Dataset):
 def get_data_loaders(train_proportion = 0.5, test_proportion = 0.25, val_proportion = 0.25, \
                         pred_size =1, batch_size = 16, num_workers = 1, pin_memory = True, \
                         use_coords = True, use_time = True, test_mode = False, scale = False, \
-                        window_size = 10, patch_size=(1,1,16), grid_size=(16,16,16), option='patch', predict_res=False, noise_std=0.01, scaler_type='standard'): 
+                        window_size = 10, patch_size=(1,1,16), grid_size=(16,16,16), option='patch',\
+                        predict_res=False, noise_std=0.01, scaler_type='standard', seed = 1, res_size='16'): 
     np.random.seed(1008)
     
-    data_path='/scratch/yd1008/nyu-capstone/data_turb_dedt1_16'
+    data_path=f'/scratch/yd1008/tnt/athena/data_turb_dedt1_{str(res_size)}'
+    if seed:
+        data_path = data_path+f'{seed}'
     if predict_res:
         data_original, data, meshed_blocks, coords, timestamps = get_rho(data_path, predict_res=predict_res, noise_std =noise_std, var_name='rho')
     else:
